@@ -1,241 +1,286 @@
-import tkinter as tk
 from pathlib import Path
-from tkinter import filedialog
 from typing import Callable
-import customtkinter as ctk
+
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+                              QLabel, QPushButton, QLineEdit, QScrollArea,
+                              QFileDialog, QSizePolicy)
 
 from ...server.config import get_config, update_config
 from ...server.ssl_utils import get_cert_fingerprint, get_local_ip
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-BG_CARD   = "#1A1D27"
-BG_INPUT  = "#0F1117"
-ACCENT    = "#3B82F6"
-SUCCESS   = "#22C55E"
-WARNING   = "#F59E0B"
-DANGER    = "#EF4444"
-TEXT_MUTED = "#6B7280"
-TEXT_LIGHT = "#E5E7EB"
-BORDER    = "#252836"
+C_SUCCESS = "#22C55E"
+C_WARNING = "#F59E0B"
+C_ACCENT  = "#3B82F6"
+C_TEXT    = "#E5E7EB"
+C_MUTED   = "#6B7280"
+C_CARD    = "#161B27"
+C_BORDER  = "#1F2937"
+C_INPUT   = "#0F1117"
 
 
-class SettingsTab(ctk.CTkFrame):
-    def __init__(self, master, on_save: Callable):
-        super().__init__(master, fg_color="transparent")
+class SettingsTab(QWidget):
+    def __init__(self, on_save: Callable):
+        super().__init__()
         self._on_save = on_save
-        self._after_id = None
+        self._save_timer: QTimer | None = None
         self._build()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
-        # Page header (outside scroll)
-        hdr = ctk.CTkFrame(self, fg_color="transparent")
-        hdr.grid(row=0, column=0, padx=28, pady=(28, 6), sticky="ew")
-        ctk.CTkLabel(
-            hdr, text="Settings",
-            font=ctk.CTkFont(size=24, weight="bold"), text_color=TEXT_LIGHT
-        ).pack(anchor="w")
-        ctk.CTkLabel(
-            hdr, text="Server configuration and security options",
-            font=ctk.CTkFont(size=13), text_color=TEXT_MUTED
-        ).pack(anchor="w", pady=(3, 0))
+        # Page header (non-scrolling)
+        hdr_widget = QWidget()
+        hdr_layout = QVBoxLayout(hdr_widget)
+        hdr_layout.setContentsMargins(28, 28, 28, 8)
+        hdr_layout.setSpacing(4)
+        title = QLabel("Settings")
+        title.setObjectName("pageTitle")
+        sub = QLabel("Server configuration and security options")
+        sub.setObjectName("pageSubtitle")
+        hdr_layout.addWidget(title)
+        hdr_layout.addWidget(sub)
+        outer.addWidget(hdr_widget)
 
-        scroll = ctk.CTkScrollableFrame(
-            self, fg_color="transparent", scrollbar_button_color=BORDER)
-        scroll.grid(row=1, column=0, sticky="nsew", padx=28, pady=(8, 24))
-        scroll.grid_columnconfigure(0, weight=1)
+        # Scroll area for card content
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        r = 0
+        content = QWidget()
+        self._cl = QVBoxLayout(content)
+        self._cl.setContentsMargins(28, 12, 28, 28)
+        self._cl.setSpacing(0)
+        self._cl.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        # ── Storage card
-        r = self._card_header(scroll, r, "Storage Location",
-                               "Where uploaded media files are saved on disk")
-        card, cr = self._open_card(scroll, r); r += 1
+        self._build_storage_card()
+        self._build_network_card()
+        self._build_security_card()
+        self._build_save_row()
 
-        path_row = ctk.CTkFrame(card, fg_color="transparent")
-        path_row.grid(row=cr, column=0, sticky="ew", pady=4); cr += 1
-        path_row.grid_columnconfigure(0, weight=1)
-        self._path_var = tk.StringVar(value=get_config()["storage_path"])
-        ctk.CTkEntry(
-            path_row, textvariable=self._path_var,
-            height=38, fg_color=BG_INPUT, border_color=BORDER,
-            text_color=TEXT_LIGHT, font=ctk.CTkFont(size=13)
-        ).grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        ctk.CTkButton(
-            path_row, text="Browse…", width=100, height=38,
-            fg_color=BORDER, hover_color="#374151",
-            text_color=TEXT_LIGHT, command=self._browse
-        ).grid(row=0, column=1)
+        scroll.setWidget(content)
+        outer.addWidget(scroll, stretch=1)
 
-        # ── Network card
-        r = self._card_header(scroll, r, "Network",
-                               "Port the server listens on (requires restart to apply)")
-        card, cr = self._open_card(scroll, r); r += 1
+    # ── Storage card ──────────────────────────────────────────────────────────
 
-        row_frame = ctk.CTkFrame(card, fg_color="transparent")
-        row_frame.grid(row=cr, column=0, sticky="ew", pady=4); cr += 1
-        self._port_var = tk.StringVar(value=str(get_config()["port"]))
-        self._field_row(row_frame, "Port", self._port_var, width=110)
+    def _build_storage_card(self):
+        self._add_section_header(
+            "Storage Location",
+            "Directory where uploaded media files are saved on disk")
 
-        ip_row = ctk.CTkFrame(card, fg_color="transparent")
-        ip_row.grid(row=cr, column=0, sticky="ew", pady=4); cr += 1
-        ctk.CTkLabel(
-            ip_row, text="Local IP", font=ctk.CTkFont(size=13),
-            text_color=TEXT_MUTED, width=110, anchor="w"
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkLabel(
-            ip_row, text=get_local_ip(),
-            font=ctk.CTkFont(size=13, weight="bold"),
-            text_color=ACCENT
-        ).grid(row=0, column=1, padx=(0, 0), sticky="w")
+        card, cl = self._make_card()
 
-        # ── Security card
-        r = self._card_header(scroll, r, "Security",
-                               "API key for iPhone authentication · SSL certificate")
-        card, cr = self._open_card(scroll, r); r += 1
+        # Path field + browse
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        self._path_edit = QLineEdit(get_config()["storage_path"])
+        self._path_edit.setPlaceholderText("Storage path…")
+        row.addWidget(self._path_edit, stretch=1)
 
-        key_label_row = ctk.CTkFrame(card, fg_color="transparent")
-        key_label_row.grid(row=cr, column=0, sticky="ew"); cr += 1
-        ctk.CTkLabel(
-            key_label_row, text="API Key",
-            font=ctk.CTkFont(size=13), text_color=TEXT_MUTED
-        ).pack(anchor="w", pady=(0, 4))
+        browse_btn = QPushButton("Browse…")
+        browse_btn.setObjectName("secondaryBtn")
+        browse_btn.setFixedWidth(100)
+        browse_btn.clicked.connect(self._browse)
+        row.addWidget(browse_btn)
+        cl.addLayout(row)
 
-        key_row = ctk.CTkFrame(card, fg_color="transparent")
-        key_row.grid(row=cr, column=0, sticky="ew", pady=(0, 10)); cr += 1
-        key_row.grid_columnconfigure(0, weight=1)
-        self._key_entry = ctk.CTkEntry(
-            key_row, height=38, show="•",
-            fg_color=BG_INPUT, border_color=BORDER,
-            text_color=TEXT_LIGHT, font=ctk.CTkFont(size=12, family="Courier")
-        )
-        self._key_entry.insert(0, get_config()["api_key"])
-        self._key_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        ctk.CTkButton(
-            key_row, text="Show", width=72, height=38,
-            fg_color=BORDER, hover_color="#374151",
-            text_color=TEXT_LIGHT, command=self._toggle_key
-        ).grid(row=0, column=1, padx=(0, 6))
-        ctk.CTkButton(
-            key_row, text="Copy", width=72, height=38,
-            fg_color=ACCENT, hover_color="#2563EB",
-            text_color="white", command=lambda: self._copy(get_config()["api_key"])
-        ).grid(row=0, column=2)
+        self._cl.addWidget(card)
+        self._cl.addSpacing(8)
 
-        # Fingerprint
+    # ── Network card ──────────────────────────────────────────────────────────
+
+    def _build_network_card(self):
+        self._add_section_header(
+            "Network",
+            "Listening port · changes apply after server restart")
+
+        card, cl = self._make_card()
+
+        port_row = QHBoxLayout()
+        port_row.setSpacing(12)
+        port_lbl = QLabel("Port")
+        port_lbl.setStyleSheet(f"color: {C_MUTED}; font-size: 13px;")
+        port_lbl.setFixedWidth(60)
+        self._port_edit = QLineEdit(str(get_config()["port"]))
+        self._port_edit.setFixedWidth(110)
+        port_row.addWidget(port_lbl)
+        port_row.addWidget(self._port_edit)
+        port_row.addStretch()
+        cl.addLayout(port_row)
+
+        cl.addSpacing(8)
+
+        ip_row = QHBoxLayout()
+        ip_row.setSpacing(12)
+        ip_label = QLabel("Local IP")
+        ip_label.setStyleSheet(f"color: {C_MUTED}; font-size: 13px;")
+        ip_label.setFixedWidth(60)
+        ip_val = QLabel(get_local_ip())
+        ip_val.setStyleSheet(
+            f"color: {C_ACCENT}; font-size: 13px; font-weight: bold;")
+        ip_row.addWidget(ip_label)
+        ip_row.addWidget(ip_val)
+        ip_row.addStretch()
+        cl.addLayout(ip_row)
+
+        self._cl.addWidget(card)
+        self._cl.addSpacing(8)
+
+    # ── Security card ─────────────────────────────────────────────────────────
+
+    def _build_security_card(self):
+        self._add_section_header(
+            "Security",
+            "API key presented by the iPhone · SSL certificate fingerprint")
+
+        card, cl = self._make_card()
+
+        # API key label
+        key_lbl = QLabel("API Key")
+        key_lbl.setStyleSheet(f"color: {C_MUTED}; font-size: 12px;")
+        cl.addWidget(key_lbl)
+        cl.addSpacing(6)
+
+        # API key field + buttons
+        key_row = QHBoxLayout()
+        key_row.setSpacing(8)
+        self._key_edit = QLineEdit(get_config()["api_key"])
+        self._key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self._key_edit.setFont(self._mono_font())
+        key_row.addWidget(self._key_edit, stretch=1)
+
+        show_btn = QPushButton("Show")
+        show_btn.setObjectName("secondaryBtn")
+        show_btn.setFixedWidth(70)
+        show_btn.clicked.connect(self._toggle_key)
+        key_row.addWidget(show_btn)
+
+        copy_btn = QPushButton("Copy")
+        copy_btn.setObjectName("primaryBtn")
+        copy_btn.setFixedWidth(70)
+        copy_btn.clicked.connect(
+            lambda: self._copy_to_clipboard(get_config()["api_key"]))
+        key_row.addWidget(copy_btn)
+        cl.addLayout(key_row)
+
+        # Fingerprint display
         fp = get_cert_fingerprint()
         if fp:
-            fp_frame = ctk.CTkFrame(card, fg_color="#0A0C12", corner_radius=8)
-            fp_frame.grid(row=cr, column=0, sticky="ew", pady=(0, 8)); cr += 1
-            ctk.CTkLabel(
-                fp_frame, text="SSL Fingerprint",
-                font=ctk.CTkFont(size=10), text_color=TEXT_MUTED
-            ).pack(anchor="w", padx=12, pady=(8, 2))
-            ctk.CTkLabel(
-                fp_frame, text=fp,
-                font=ctk.CTkFont(size=10, family="Courier"),
-                text_color=SUCCESS, wraplength=520, justify="left"
-            ).pack(anchor="w", padx=12, pady=(0, 8))
+            cl.addSpacing(14)
+            fp_card = QFrame()
+            fp_card.setObjectName("cardElevated")
+            fp_layout = QVBoxLayout(fp_card)
+            fp_layout.setContentsMargins(14, 10, 14, 10)
+            fp_layout.setSpacing(4)
+            fp_title = QLabel("SSL Certificate Fingerprint")
+            fp_title.setStyleSheet(f"color: {C_MUTED}; font-size: 11px;")
+            fp_val = QLabel(fp)
+            fp_val.setFont(self._mono_font(10))
+            fp_val.setStyleSheet(f"color: {C_SUCCESS}; font-size: 10px;")
+            fp_val.setWordWrap(True)
+            fp_layout.addWidget(fp_title)
+            fp_layout.addWidget(fp_val)
+            cl.addWidget(fp_card)
 
-        ctk.CTkButton(
-            card, text="Regenerate SSL Certificate",
-            height=36, fg_color="transparent",
-            border_width=1, border_color=BORDER,
-            text_color=TEXT_MUTED, hover_color=BORDER,
-            command=self._regen_cert
-        ).grid(row=cr, column=0, sticky="w", pady=(4, 0)); cr += 1
+        # Regenerate cert button
+        cl.addSpacing(12)
+        regen_btn = QPushButton("Regenerate SSL Certificate")
+        regen_btn.setObjectName("ghostBtn")
+        regen_btn.setFixedHeight(36)
+        regen_btn.clicked.connect(self._regen_cert)
+        cl.addWidget(regen_btn, alignment=Qt.AlignmentFlag.AlignLeft)
 
-        # ── Save row (outside scroll card)
-        save_frame = ctk.CTkFrame(scroll, fg_color="transparent")
-        save_frame.grid(row=r, column=0, sticky="ew", pady=(20, 0)); r += 1
+        self._cl.addWidget(card)
+        self._cl.addSpacing(8)
 
-        ctk.CTkButton(
-            save_frame, text="Save Settings",
-            height=42, width=160,
-            fg_color=ACCENT, hover_color="#2563EB",
-            font=ctk.CTkFont(size=14, weight="bold"),
-            command=self._save
-        ).grid(row=0, column=0, sticky="w")
+    # ── Save row ──────────────────────────────────────────────────────────────
 
-        self._saved_lbl = ctk.CTkLabel(
-            save_frame, text="",
-            text_color=SUCCESS, font=ctk.CTkFont(size=13)
-        )
-        self._saved_lbl.grid(row=0, column=1, padx=14)
+    def _build_save_row(self):
+        self._cl.addSpacing(12)
+        row = QHBoxLayout()
+        row.setSpacing(16)
+
+        save_btn = QPushButton("Save Settings")
+        save_btn.setObjectName("primaryBtn")
+        save_btn.setFixedHeight(42)
+        save_btn.setFixedWidth(160)
+        save_btn.clicked.connect(self._save)
+        row.addWidget(save_btn)
+
+        self._saved_lbl = QLabel("")
+        self._saved_lbl.setStyleSheet(f"color: {C_SUCCESS}; font-size: 13px;")
+        row.addWidget(self._saved_lbl)
+        row.addStretch()
+
+        self._cl.addLayout(row)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    def _card_header(self, parent, row: int, title: str, subtitle: str = "") -> int:
-        frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.grid(row=row, column=0, sticky="ew", pady=(20, 4))
-        ctk.CTkLabel(
-            frame, text=title,
-            font=ctk.CTkFont(size=15, weight="bold"), text_color=TEXT_LIGHT
-        ).pack(anchor="w")
+    def _add_section_header(self, title: str, subtitle: str = ""):
+        self._cl.addSpacing(20)
+        t = QLabel(title)
+        t.setObjectName("sectionTitle")
+        self._cl.addWidget(t)
         if subtitle:
-            ctk.CTkLabel(
-                frame, text=subtitle,
-                font=ctk.CTkFont(size=11), text_color=TEXT_MUTED
-            ).pack(anchor="w", pady=(1, 0))
-        return row + 1
+            s = QLabel(subtitle)
+            s.setObjectName("sectionSub")
+            self._cl.addWidget(s)
+        self._cl.addSpacing(8)
 
-    def _open_card(self, parent, row: int):
-        card = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=12)
-        card.grid(row=row, column=0, sticky="ew", pady=(0, 4))
-        card.grid_columnconfigure(0, weight=1)
-        inner = ctk.CTkFrame(card, fg_color="transparent")
-        inner.grid(row=0, column=0, sticky="ew", padx=16, pady=12)
-        inner.grid_columnconfigure(0, weight=1)
-        return inner, 0
+    def _make_card(self) -> tuple[QFrame, QVBoxLayout]:
+        card = QFrame()
+        card.setObjectName("card")
+        cl = QVBoxLayout(card)
+        cl.setContentsMargins(18, 16, 18, 16)
+        cl.setSpacing(6)
+        return card, cl
 
-    def _field_row(self, parent, label: str, var: tk.StringVar, width: int = 200):
-        parent.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(
-            parent, text=label, font=ctk.CTkFont(size=13),
-            text_color=TEXT_MUTED, width=110, anchor="w"
-        ).grid(row=0, column=0, sticky="w")
-        ctk.CTkEntry(
-            parent, textvariable=var, width=width, height=38,
-            fg_color=BG_INPUT, border_color=BORDER, text_color=TEXT_LIGHT
-        ).grid(row=0, column=1, sticky="w")
+    @staticmethod
+    def _mono_font(size: int = 12):
+        from PyQt6.QtGui import QFont
+        f = QFont("Courier New", size)
+        return f
 
     def _browse(self):
-        folder = filedialog.askdirectory(
-            title="Select Storage Folder", initialdir=self._path_var.get())
+        folder = QFileDialog.getExistingDirectory(
+            self, "Select Storage Folder", self._path_edit.text())
         if folder:
-            self._path_var.set(folder)
+            self._path_edit.setText(folder)
 
     def _toggle_key(self):
-        self._key_entry.configure(
-            show="" if self._key_entry.cget("show") == "•" else "•")
+        if self._key_edit.echoMode() == QLineEdit.EchoMode.Password:
+            self._key_edit.setEchoMode(QLineEdit.EchoMode.Normal)
+        else:
+            self._key_edit.setEchoMode(QLineEdit.EchoMode.Password)
 
-    def _copy(self, text: str):
-        self.clipboard_clear()
-        self.clipboard_append(text)
+    def _copy_to_clipboard(self, text: str):
+        from PyQt6.QtWidgets import QApplication
+        QApplication.clipboard().setText(text)
 
     def _save(self):
-        path = self._path_var.get()
+        path = self._path_edit.text().strip()
         try:
-            port = int(self._port_var.get())
+            port = int(self._port_edit.text().strip())
         except ValueError:
             port = 8443
         Path(path).mkdir(parents=True, exist_ok=True)
         update_config(storage_path=path, port=port)
         self._on_save(path, port)
-        self._saved_lbl.configure(text="✓  Settings saved", text_color=SUCCESS)
-        if self._after_id:
-            self.after_cancel(self._after_id)
-        self._after_id = self.after(
-            3000, lambda: self._saved_lbl.configure(text=""))
+        self._saved_lbl.setText("✓  Settings saved")
+        self._saved_lbl.setStyleSheet(f"color: {C_SUCCESS}; font-size: 13px;")
+        if self._save_timer:
+            self._save_timer.stop()
+        self._save_timer = QTimer.singleShot(
+            3000, lambda: self._saved_lbl.setText(""))
 
     def _regen_cert(self):
         from ...server.ssl_utils import generate_self_signed_cert
         generate_self_signed_cert(force=True)
-        self._saved_lbl.configure(
-            text="✓  New certificate generated — restart server to apply",
-            text_color=WARNING
-        )
+        self._saved_lbl.setText(
+            "✓  New certificate generated — restart server to apply")
+        self._saved_lbl.setStyleSheet(f"color: {C_WARNING}; font-size: 13px;")

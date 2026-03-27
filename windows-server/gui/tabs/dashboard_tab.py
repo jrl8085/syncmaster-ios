@@ -1,36 +1,41 @@
 from datetime import datetime
-import customtkinter as ctk
 
-# ── Palette (matches app_window) ─────────────────────────────────────────────
-BG_CARD   = "#1A1D27"
-BG_CARD2  = "#1F2330"
-ACCENT    = "#3B82F6"
-SUCCESS   = "#22C55E"
-WARNING   = "#F59E0B"
-DANGER    = "#EF4444"
-PURPLE    = "#A855F7"
-TEXT_MUTED = "#6B7280"
-TEXT_LIGHT = "#E5E7EB"
-BORDER    = "#252836"
+from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtGui import QColor, QFont
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+                              QLabel, QScrollArea, QSizePolicy, QSpacerItem)
 
-MEDIA_META = {
-    "photo":            ("🖼",  ACCENT),
-    "video":            ("🎬",  PURPLE),
-    "live_photo_image": ("✨",  "#06B6D4"),
-    "live_photo_video": ("✨",  "#06B6D4"),
-    "raw":              ("📷",  WARNING),
-    "prores":           ("🎥",  DANGER),
-    "slow_mo":          ("🐢",  SUCCESS),
-    "burst":            ("📸",  WARNING),
-    "depth_effect":     ("🌀",  PURPLE),
-}
+C_SUCCESS  = "#22C55E"
+C_WARNING  = "#F59E0B"
+C_ACCENT   = "#3B82F6"
+C_PURPLE   = "#A855F7"
+C_CYAN     = "#06B6D4"
+C_DANGER   = "#EF4444"
+C_TEXT     = "#E5E7EB"
+C_MUTED    = "#6B7280"
+C_CARD     = "#161B27"
+C_ROW      = "#1A2035"
+C_ROW_ALT  = "#161B27"
+C_BORDER   = "#1F2937"
 
 STAT_CONFIG = [
-    ("files",  "Files Received",    "0",   ACCENT),
-    ("bytes",  "Data Transferred",  "0 B", SUCCESS),
-    ("time",   "Last Received",     "—",   PURPLE),
-    ("rate",   "Session Active",    "Yes", WARNING),
+    ("files",  "Files Received",    "0",    C_ACCENT),
+    ("bytes",  "Data Transferred",  "0 B",  C_SUCCESS),
+    ("time",   "Last Received",     "—",    C_PURPLE),
+    ("status", "Server Status",     "Online", C_WARNING),
 ]
+
+MEDIA_META = {
+    "photo":            ("🖼",  C_ACCENT),
+    "video":            ("🎬",  C_PURPLE),
+    "live_photo_image": ("✨",  C_CYAN),
+    "live_photo_video": ("✨",  C_CYAN),
+    "raw":              ("📷",  C_WARNING),
+    "prores":           ("🎥",  C_DANGER),
+    "slow_mo":          ("🐢",  C_SUCCESS),
+    "burst":            ("📸",  C_WARNING),
+    "depth_effect":     ("🌀",  C_PURPLE),
+}
 
 
 def _fmt(n: float) -> str:
@@ -41,185 +46,233 @@ def _fmt(n: float) -> str:
     return f"{n:.1f} PB"
 
 
-class DashboardTab(ctk.CTkFrame):
-    def __init__(self, master):
-        super().__init__(master, fg_color="transparent")
+class DashboardTab(QWidget):
+    def __init__(self):
+        super().__init__()
         self._files = 0
         self._bytes = 0
-        self._rows: list[ctk.CTkFrame] = []
-        self._stat_labels: dict[str, ctk.CTkLabel] = {}
+        self._row_widgets: list[QFrame] = []
+        self._stat_labels: dict[str, QLabel] = {}
         self._build()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 28, 28, 24)
+        layout.setSpacing(0)
 
         # Header
-        hdr = ctk.CTkFrame(self, fg_color="transparent")
-        hdr.grid(row=0, column=0, padx=28, pady=(28, 6), sticky="ew")
-        ctk.CTkLabel(
-            hdr, text="Dashboard",
-            font=ctk.CTkFont(size=24, weight="bold"),
-            text_color=TEXT_LIGHT
-        ).pack(anchor="w")
-        self._subtitle = ctk.CTkLabel(
-            hdr, text="Waiting for uploads from your iPhone…",
-            font=ctk.CTkFont(size=13), text_color=TEXT_MUTED
-        )
-        self._subtitle.pack(anchor="w", pady=(3, 0))
+        self._subtitle = self._make_header(layout, "Dashboard",
+                                            "Waiting for uploads from your iPhone…")
+        layout.addSpacing(18)
 
-        # Stat tiles
-        stats_frame = ctk.CTkFrame(self, fg_color="transparent")
-        stats_frame.grid(row=1, column=0, padx=28, pady=(10, 8), sticky="ew")
-        stats_frame.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        # Stat tiles row
+        tiles_row = QHBoxLayout()
+        tiles_row.setSpacing(12)
+        for key, title, init, color in STAT_CONFIG:
+            tile, val_lbl = self._make_stat_tile(title, init, color)
+            self._stat_labels[key] = val_lbl
+            tiles_row.addWidget(tile)
+        layout.addLayout(tiles_row)
+        layout.addSpacing(20)
 
-        for col, (key, title, init, color) in enumerate(STAT_CONFIG):
-            lbl = self._stat_tile(stats_frame, title, init, color, col)
-            self._stat_labels[key] = lbl
+        # Feed card
+        feed_card = QFrame()
+        feed_card.setObjectName("card")
+        feed_layout = QVBoxLayout(feed_card)
+        feed_layout.setContentsMargins(0, 0, 0, 0)
+        feed_layout.setSpacing(0)
 
-        # Recent uploads
-        feed_card = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=14)
-        feed_card.grid(row=2, column=0, padx=28, pady=(4, 24), sticky="nsew")
-        feed_card.grid_columnconfigure(0, weight=1)
-        feed_card.grid_rowconfigure(1, weight=1)
+        # Feed header
+        feed_hdr = QWidget()
+        fh_layout = QHBoxLayout(feed_hdr)
+        fh_layout.setContentsMargins(18, 14, 18, 10)
+        fh_title = QLabel("Recent Uploads")
+        fh_title.setObjectName("sectionTitle")
+        self._feed_count = QLabel("")
+        self._feed_count.setObjectName("sectionSub")
+        fh_layout.addWidget(fh_title)
+        fh_layout.addStretch()
+        fh_layout.addWidget(self._feed_count)
+        feed_layout.addWidget(feed_hdr)
 
-        feed_hdr = ctk.CTkFrame(feed_card, fg_color="transparent")
-        feed_hdr.grid(row=0, column=0, padx=18, pady=(16, 10), sticky="ew")
-        feed_hdr.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            feed_hdr, text="Recent Uploads",
-            font=ctk.CTkFont(size=15, weight="bold"), text_color=TEXT_LIGHT
-        ).grid(row=0, column=0, sticky="w")
-        self._feed_count = ctk.CTkLabel(
-            feed_hdr, text="", font=ctk.CTkFont(size=11), text_color=TEXT_MUTED
-        )
-        self._feed_count.grid(row=0, column=1, sticky="e")
+        # Column header row
+        col_hdr = QFrame()
+        col_hdr.setObjectName("tableHeader")
+        ch_layout = QHBoxLayout(col_hdr)
+        ch_layout.setContentsMargins(16, 6, 16, 6)
+        ch_layout.setSpacing(0)
+        for col_name, stretch, align in [
+            ("TYPE",  0,  Qt.AlignmentFlag.AlignLeft),
+            ("TIME",  0,  Qt.AlignmentFlag.AlignLeft),
+            ("FILENAME", 1, Qt.AlignmentFlag.AlignLeft),
+            ("SIZE",  0,  Qt.AlignmentFlag.AlignRight),
+            ("STATUS",0,  Qt.AlignmentFlag.AlignCenter),
+        ]:
+            lbl = QLabel(col_name)
+            lbl.setObjectName("colHeader")
+            lbl.setAlignment(align)
+            if col_name == "TYPE":
+                lbl.setFixedWidth(48)
+            elif col_name == "TIME":
+                lbl.setFixedWidth(80)
+            elif col_name == "SIZE":
+                lbl.setFixedWidth(80)
+            elif col_name == "STATUS":
+                lbl.setFixedWidth(90)
+            ch_layout.addWidget(lbl, stretch)
+        feed_layout.addWidget(col_hdr)
 
-        # Column headers
-        col_hdr = ctk.CTkFrame(feed_card, fg_color="transparent")
-        col_hdr.grid(row=1, column=0, padx=18, pady=(0, 6), sticky="ew")
-        col_hdr.grid_columnconfigure(2, weight=1)
-        for ci, (lbl, anchor) in enumerate([
-            ("Type", "w"), ("Time", "w"), ("Filename", "w"), ("Size", "e"), ("Status", "e")
-        ]):
-            ctk.CTkLabel(
-                col_hdr, text=lbl, font=ctk.CTkFont(size=10, weight="bold"),
-                text_color=TEXT_MUTED, anchor=anchor
-            ).grid(row=0, column=ci, padx=(0 if ci else 0, 8), sticky=anchor)
+        # Scrollable feed
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self._scroll = ctk.CTkScrollableFrame(
-            feed_card, fg_color="transparent", scrollbar_button_color=BORDER)
-        self._scroll.grid(row=2, column=0, padx=12, pady=(0, 12), sticky="nsew")
-        self._scroll.grid_columnconfigure(2, weight=1)
-        feed_card.grid_rowconfigure(2, weight=1)
+        self._feed_container = QWidget()
+        self._feed_layout = QVBoxLayout(self._feed_container)
+        self._feed_layout.setContentsMargins(8, 8, 8, 8)
+        self._feed_layout.setSpacing(4)
+        self._feed_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self._empty = ctk.CTkLabel(
-            self._scroll,
-            text="No uploads yet  ·  Open SyncMaster on your iPhone to start",
-            text_color=TEXT_MUTED, font=ctk.CTkFont(size=13)
-        )
-        self._empty.grid(row=0, column=0, columnspan=5, pady=50)
+        self._empty_lbl = QLabel(
+            "No uploads yet  ·  open SyncMaster on your iPhone to start")
+        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_lbl.setStyleSheet(
+            f"color: {C_MUTED}; font-size: 13px; padding: 48px 0;")
+        self._feed_layout.addWidget(self._empty_lbl)
 
-    # ── Stat tile ─────────────────────────────────────────────────────────────
+        scroll_area.setWidget(self._feed_container)
+        feed_layout.addWidget(scroll_area)
 
-    def _stat_tile(self, parent, title: str, value: str, color: str, col: int) -> ctk.CTkLabel:
-        card = ctk.CTkFrame(parent, fg_color=BG_CARD, corner_radius=14)
-        card.grid(row=0, column=col, padx=5, pady=4, sticky="ew")
+        layout.addWidget(feed_card, stretch=1)
 
-        # Colored top bar
-        bar = ctk.CTkFrame(card, height=3, corner_radius=2, fg_color=color)
-        bar.pack(fill="x", padx=0, pady=0, side="top")
+    # ── Widgets ───────────────────────────────────────────────────────────────
 
-        ctk.CTkLabel(
-            card, text=title,
-            font=ctk.CTkFont(size=11), text_color=TEXT_MUTED, anchor="w"
-        ).pack(padx=16, pady=(12, 2), anchor="w")
+    def _make_header(self, layout: QVBoxLayout, title: str, subtitle: str) -> QLabel:
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("pageTitle")
+        layout.addWidget(title_lbl)
+        layout.addSpacing(4)
+        sub_lbl = QLabel(subtitle)
+        sub_lbl.setObjectName("pageSubtitle")
+        layout.addWidget(sub_lbl)
+        return sub_lbl
 
-        lbl = ctk.CTkLabel(
-            card, text=value,
-            font=ctk.CTkFont(size=26, weight="bold"),
-            text_color=TEXT_LIGHT, anchor="w"
-        )
-        lbl.pack(padx=16, pady=(0, 14), anchor="w")
-        return lbl
+    def _make_stat_tile(self, title: str, value: str, color: str) -> tuple[QFrame, QLabel]:
+        tile = QFrame()
+        tile.setObjectName("statTile")
 
-    # ── Upload event ─────────────────────────────────────────────────────────
+        outer = QVBoxLayout(tile)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Colored accent bar at top
+        bar = QFrame()
+        bar.setFixedHeight(3)
+        bar.setStyleSheet(
+            f"background-color: {color}; border-radius: 2px; border-bottom-left-radius: 0; border-bottom-right-radius: 0;")
+        outer.addWidget(bar)
+
+        inner = QVBoxLayout()
+        inner.setContentsMargins(16, 10, 16, 14)
+        inner.setSpacing(4)
+
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("statLabel")
+
+        val_lbl = QLabel(value)
+        val_lbl.setObjectName("statValue")
+
+        inner.addWidget(title_lbl)
+        inner.addWidget(val_lbl)
+        outer.addLayout(inner)
+        return tile, val_lbl
+
+    # ── Upload event ──────────────────────────────────────────────────────────
 
     def on_upload(self, event: dict):
         self._files += 1
         self._bytes += event.get("size_bytes", 0)
 
-        self._stat_labels["files"].configure(text=str(self._files))
-        self._stat_labels["bytes"].configure(text=_fmt(self._bytes))
-        self._stat_labels["time"].configure(text=datetime.now().strftime("%H:%M:%S"))
-        self._feed_count.configure(
-            text=f"showing last {min(len(self._rows)+1, 10)} of {self._files}")
+        self._stat_labels["files"].setText(str(self._files))
+        self._stat_labels["bytes"].setText(_fmt(self._bytes))
+        self._stat_labels["time"].setText(datetime.now().strftime("%H:%M:%S"))
+        self._feed_count.setText(
+            f"showing last {min(len(self._row_widgets)+1, 10)} of {self._files}")
 
         fname = event.get("filename", "")
-        self._subtitle.configure(
-            text=f"Last received: {fname}  ·  {_fmt(event.get('size_bytes', 0))}",
-            text_color=SUCCESS
-        )
+        self._subtitle.setText(
+            f"Last received: {fname}  ·  {_fmt(event.get('size_bytes', 0))}")
+        self._subtitle.setStyleSheet(f"color: {C_SUCCESS}; font-size: 13px;")
 
-        if self._empty.winfo_ismapped():
-            self._empty.grid_forget()
+        if self._empty_lbl.isVisible():
+            self._empty_lbl.hide()
 
-        self._add_row(event)
+        self._prepend_row(event)
 
-    def _add_row(self, event: dict):
+    def _prepend_row(self, event: dict):
         is_dup = event.get("duplicate", False)
         media_type = event.get("media_type", "photo")
-        icon, icon_color = MEDIA_META.get(media_type, ("📁", TEXT_MUTED))
+        icon, icon_color = MEDIA_META.get(media_type, ("📁", C_MUTED))
+        fname = event.get("filename", "")
         size_str = _fmt(event.get("size_bytes", 0))
         time_str = datetime.now().strftime("%H:%M:%S")
-        fname = event.get("filename", "")
 
-        row = ctk.CTkFrame(
-            self._scroll, fg_color=BG_CARD2, corner_radius=8, height=46)
-        row.grid(row=0, column=0, columnspan=5, sticky="ew", pady=2)
-        row.grid_columnconfigure(2, weight=1)
-        row.grid_propagate(False)
+        odd = len(self._row_widgets) % 2 == 0
+        row = QFrame()
+        row.setObjectName("feedRow" if odd else "feedRowAlt")
+        row.setFixedHeight(44)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(12, 0, 12, 0)
+        row_layout.setSpacing(0)
 
         # Icon
-        ctk.CTkLabel(
-            row, text=icon, font=ctk.CTkFont(size=16),
-            text_color=icon_color, width=36
-        ).grid(row=0, column=0, padx=(10, 4))
+        icon_lbl = QLabel(icon)
+        icon_lbl.setFixedWidth(48)
+        icon_lbl.setStyleSheet(f"color: {icon_color}; font-size: 16px;")
+        row_layout.addWidget(icon_lbl)
 
         # Time
-        ctk.CTkLabel(
-            row, text=time_str, font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED, width=70, anchor="w"
-        ).grid(row=0, column=1, padx=4)
+        time_lbl = QLabel(time_str)
+        time_lbl.setFixedWidth(80)
+        time_lbl.setStyleSheet(f"color: {C_MUTED}; font-size: 11px;")
+        row_layout.addWidget(time_lbl)
 
         # Filename
-        ctk.CTkLabel(
-            row, text=fname, font=ctk.CTkFont(size=12, weight="bold"),
-            text_color=TEXT_LIGHT, anchor="w"
-        ).grid(row=0, column=2, padx=4, sticky="w")
+        name_lbl = QLabel(fname)
+        name_lbl.setStyleSheet(
+            f"color: {C_TEXT}; font-size: 12px; font-weight: bold;")
+        name_lbl.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        row_layout.addWidget(name_lbl, stretch=1)
 
         # Size
-        ctk.CTkLabel(
-            row, text=size_str, font=ctk.CTkFont(size=11),
-            text_color=TEXT_MUTED, width=72, anchor="e"
-        ).grid(row=0, column=3, padx=4)
+        size_lbl = QLabel(size_str)
+        size_lbl.setFixedWidth(80)
+        size_lbl.setAlignment(Qt.AlignmentFlag.AlignRight |
+                               Qt.AlignmentFlag.AlignVCenter)
+        size_lbl.setStyleSheet(f"color: {C_MUTED}; font-size: 11px;")
+        row_layout.addWidget(size_lbl)
 
-        # Status badge
-        badge_color = BG_CARD if is_dup else "#14532D"
-        badge_text_color = WARNING if is_dup else SUCCESS
-        badge_text = "Duplicate" if is_dup else "✓ Saved"
-        badge = ctk.CTkLabel(
-            row, text=badge_text, font=ctk.CTkFont(size=10, weight="bold"),
-            text_color=badge_text_color, fg_color=badge_color,
-            corner_radius=6, width=72
-        )
-        badge.grid(row=0, column=4, padx=(4, 10))
+        # Badge
+        badge_bg = "#14532D" if not is_dup else "#1F2937"
+        badge_text_color = C_SUCCESS if not is_dup else C_WARNING
+        badge = QLabel("✓ Saved" if not is_dup else "Duplicate")
+        badge.setFixedWidth(90)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(
+            f"color: {badge_text_color}; background: {badge_bg}; "
+            f"border-radius: 6px; font-size: 10px; font-weight: bold; padding: 3px 0;")
+        row_layout.addWidget(badge)
 
-        # Push older rows down
-        for i, r in enumerate(self._rows, start=1):
-            r.grid(row=i, column=0, columnspan=5, sticky="ew", pady=2)
-        self._rows.insert(0, row)
-        if len(self._rows) > 10:
-            self._rows.pop().destroy()
+        self._feed_layout.insertWidget(0, row)
+        self._row_widgets.insert(0, row)
+
+        # Keep at most 10 rows visible
+        if len(self._row_widgets) > 10:
+            old = self._row_widgets.pop()
+            self._feed_layout.removeWidget(old)
+            old.deleteLater()

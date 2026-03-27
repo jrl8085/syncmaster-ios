@@ -1,36 +1,40 @@
 from datetime import datetime
-import customtkinter as ctk
 
-# ── Palette ───────────────────────────────────────────────────────────────────
-BG_CARD   = "#1A1D27"
-BG_ROW_A  = "#1F2330"
-BG_ROW_B  = "#1A1D27"
-ACCENT    = "#3B82F6"
-SUCCESS   = "#22C55E"
-WARNING   = "#F59E0B"
-TEXT_MUTED = "#6B7280"
-TEXT_LIGHT = "#E5E7EB"
-BORDER    = "#252836"
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+                              QLabel, QScrollArea, QSizePolicy)
+
+C_SUCCESS = "#22C55E"
+C_WARNING = "#F59E0B"
+C_ACCENT  = "#3B82F6"
+C_PURPLE  = "#A855F7"
+C_CYAN    = "#06B6D4"
+C_DANGER  = "#EF4444"
+C_TEXT    = "#E5E7EB"
+C_MUTED   = "#6B7280"
+C_ROW_A   = "#1A2035"
+C_ROW_B   = "#161B27"
+C_BORDER  = "#1F2937"
 
 MEDIA_META = {
-    "photo":            ("🖼",  ACCENT),
-    "video":            ("🎬",  "#A855F7"),
-    "live_photo_image": ("✨",  "#06B6D4"),
-    "live_photo_video": ("✨",  "#06B6D4"),
-    "raw":              ("📷",  WARNING),
-    "prores":           ("🎥",  "#EF4444"),
-    "slow_mo":          ("🐢",  SUCCESS),
-    "burst":            ("📸",  WARNING),
-    "depth_effect":     ("🌀",  "#A855F7"),
+    "photo":            ("🖼",  C_ACCENT),
+    "video":            ("🎬",  C_PURPLE),
+    "live_photo_image": ("✨",  C_CYAN),
+    "live_photo_video": ("✨",  C_CYAN),
+    "raw":              ("📷",  C_WARNING),
+    "prores":           ("🎥",  C_DANGER),
+    "slow_mo":          ("🐢",  C_SUCCESS),
+    "burst":            ("📸",  C_WARNING),
+    "depth_effect":     ("🌀",  C_PURPLE),
 }
 
 COL_HEADERS = [
-    ("",         30,  "center"),
-    ("Time",     78,  "w"),
-    ("Filename", 0,   "w"),    # weight=1
-    ("Type",     100, "center"),
-    ("Size",     80,  "e"),
-    ("Status",   90,  "center"),
+    ("",         40,   Qt.AlignmentFlag.AlignCenter),
+    ("TIME",     80,   Qt.AlignmentFlag.AlignLeft),
+    ("FILENAME", -1,   Qt.AlignmentFlag.AlignLeft),   # -1 = stretch
+    ("TYPE",     110,  Qt.AlignmentFlag.AlignCenter),
+    ("SIZE",     80,   Qt.AlignmentFlag.AlignRight),
+    ("STATUS",   90,   Qt.AlignmentFlag.AlignCenter),
 ]
 
 
@@ -42,134 +46,146 @@ def _fmt(n: float) -> str:
     return f"{n:.1f} PB"
 
 
-class HistoryTab(ctk.CTkFrame):
-    def __init__(self, master):
-        super().__init__(master, fg_color="transparent")
+class HistoryTab(QWidget):
+    def __init__(self):
+        super().__init__()
         self._rows: list[dict] = []
         self._build()
 
     # ── Build ─────────────────────────────────────────────────────────────────
 
     def _build(self):
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(28, 28, 28, 24)
+        layout.setSpacing(0)
 
-        # Header
-        hdr = ctk.CTkFrame(self, fg_color="transparent")
-        hdr.grid(row=0, column=0, padx=28, pady=(28, 6), sticky="ew")
-        hdr.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(
-            hdr, text="Upload History",
-            font=ctk.CTkFont(size=24, weight="bold"), text_color=TEXT_LIGHT
-        ).grid(row=0, column=0, sticky="w")
-        self._count_lbl = ctk.CTkLabel(
-            hdr, text="0 files total",
-            font=ctk.CTkFont(size=13), text_color=TEXT_MUTED
-        )
-        self._count_lbl.grid(row=1, column=0, sticky="w", pady=(3, 0))
+        # Page header
+        title = QLabel("Upload History")
+        title.setObjectName("pageTitle")
+        layout.addWidget(title)
+        layout.addSpacing(4)
+        self._count_lbl = QLabel("0 files total")
+        self._count_lbl.setObjectName("pageSubtitle")
+        layout.addWidget(self._count_lbl)
+        layout.addSpacing(20)
 
         # Table card
-        table_card = ctk.CTkFrame(self, fg_color=BG_CARD, corner_radius=14)
-        table_card.grid(row=2, column=0, padx=28, pady=(8, 24), sticky="nsew")
-        table_card.grid_columnconfigure(0, weight=1)
-        table_card.grid_rowconfigure(1, weight=1)
+        card = QFrame()
+        card.setObjectName("card")
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(0)
 
-        # Column header row
-        col_hdr = ctk.CTkFrame(table_card, fg_color="#151720", corner_radius=0)
-        col_hdr.grid(row=0, column=0, sticky="ew", padx=0, pady=0)
-        col_hdr.grid_columnconfigure(2, weight=1)
+        # Column header
+        col_hdr = QFrame()
+        col_hdr.setObjectName("tableHeader")
+        col_hdr.setFixedHeight(36)
+        ch_layout = QHBoxLayout(col_hdr)
+        ch_layout.setContentsMargins(12, 0, 12, 0)
+        ch_layout.setSpacing(0)
+        for col_name, width, align in COL_HEADERS:
+            lbl = QLabel(col_name)
+            lbl.setObjectName("colHeader")
+            lbl.setAlignment(align)
+            if width > 0:
+                lbl.setFixedWidth(width)
+            ch_layout.addWidget(lbl, 0 if width > 0 else 1)
+        card_layout.addWidget(col_hdr)
 
-        for ci, (lbl, width, anchor) in enumerate(COL_HEADERS):
-            kw = {"width": width} if width else {}
-            ctk.CTkLabel(
-                col_hdr, text=lbl,
-                font=ctk.CTkFont(size=10, weight="bold"),
-                text_color=TEXT_MUTED, anchor=anchor, **kw
-            ).grid(row=0, column=ci, padx=6, pady=8, sticky="ew" if not width else anchor)
-            if not width:
-                col_hdr.grid_columnconfigure(ci, weight=1)
+        # Scroll area
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        # Scrollable list
-        self._scroll = ctk.CTkScrollableFrame(
-            table_card, fg_color="transparent",
-            scrollbar_button_color=BORDER
-        )
-        self._scroll.grid(row=1, column=0, sticky="nsew", padx=8, pady=(0, 8))
-        self._scroll.grid_columnconfigure(2, weight=1)
+        self._rows_container = QWidget()
+        self._rows_layout = QVBoxLayout(self._rows_container)
+        self._rows_layout.setContentsMargins(8, 8, 8, 8)
+        self._rows_layout.setSpacing(3)
+        self._rows_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        self._empty = ctk.CTkLabel(
-            self._scroll,
-            text="No history yet  ·  uploads will appear here",
-            text_color=TEXT_MUTED, font=ctk.CTkFont(size=13)
-        )
-        self._empty.grid(row=0, column=0, columnspan=6, pady=60)
+        self._empty_lbl = QLabel("No history yet  ·  uploads will appear here")
+        self._empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_lbl.setStyleSheet(
+            f"color: {C_MUTED}; font-size: 13px; padding: 60px 0;")
+        self._rows_layout.addWidget(self._empty_lbl)
 
-    # ── Events ────────────────────────────────────────────────────────────────
+        scroll.setWidget(self._rows_container)
+        card_layout.addWidget(scroll)
+
+        layout.addWidget(card, stretch=1)
+
+    # ── Event ─────────────────────────────────────────────────────────────────
 
     def on_upload(self, event: dict):
-        if self._empty.winfo_ismapped():
-            self._empty.grid_forget()
-        # stamp the time now
-        event = dict(event, _received=datetime.now().strftime("%H:%M:%S"))
-        self._rows.insert(0, event)
-        self._count_lbl.configure(text=f"{len(self._rows)} files total")
-        self._redraw()
+        if self._empty_lbl.isVisible():
+            self._empty_lbl.hide()
 
-    def _redraw(self):
-        for w in self._scroll.winfo_children():
-            w.destroy()
-        self._scroll.grid_columnconfigure(2, weight=1)
+        row_data = dict(event, _received=datetime.now().strftime("%H:%M:%S"))
+        self._rows.insert(0, row_data)
+        self._count_lbl.setText(f"{len(self._rows)} files total")
+        self._rebuild()
+
+    def _rebuild(self):
+        # Remove old row widgets (keep empty label)
+        while self._rows_layout.count() > 0:
+            item = self._rows_layout.takeAt(0)
+            if item.widget() and item.widget() is not self._empty_lbl:
+                item.widget().deleteLater()
 
         for idx, row in enumerate(self._rows[:500]):
-            bg = BG_ROW_A if idx % 2 == 0 else BG_ROW_B
-            is_dup = row.get("duplicate", False)
-            media_type = row.get("media_type", "photo")
-            icon, icon_color = MEDIA_META.get(media_type, ("📁", TEXT_MUTED))
-            type_label = media_type.replace("_", " ").title()
+            self._rows_layout.addWidget(self._make_row(row, idx))
 
-            f = ctk.CTkFrame(self._scroll, fg_color=bg, corner_radius=6, height=38)
-            f.grid(row=idx, column=0, columnspan=6, sticky="ew", pady=1)
-            f.grid_columnconfigure(2, weight=1)
-            f.grid_propagate(False)
+    def _make_row(self, row: dict, idx: int) -> QFrame:
+        is_dup = row.get("duplicate", False)
+        media_type = row.get("media_type", "photo")
+        icon, icon_color = MEDIA_META.get(media_type, ("📁", C_MUTED))
+        type_label = media_type.replace("_", " ").title()
 
-            # Icon
-            ctk.CTkLabel(
-                f, text=icon, font=ctk.CTkFont(size=14),
-                text_color=icon_color, width=30, anchor="center"
-            ).grid(row=0, column=0, padx=(8, 2))
+        f = QFrame()
+        f.setFixedHeight(38)
+        f.setStyleSheet(
+            f"background-color: {C_ROW_A if idx % 2 == 0 else C_ROW_B}; "
+            f"border-radius: 6px;")
 
-            # Time
-            ctk.CTkLabel(
-                f, text=row.get("_received", ""),
-                font=ctk.CTkFont(size=11), text_color=TEXT_MUTED,
-                width=78, anchor="w"
-            ).grid(row=0, column=1, padx=4)
+        row_layout = QHBoxLayout(f)
+        row_layout.setContentsMargins(12, 0, 12, 0)
+        row_layout.setSpacing(0)
 
-            # Filename
-            ctk.CTkLabel(
-                f, text=row.get("filename", ""),
-                font=ctk.CTkFont(size=12), text_color=TEXT_LIGHT,
-                anchor="w"
-            ).grid(row=0, column=2, padx=4, sticky="w")
+        def cell(text, width, color, align=Qt.AlignmentFlag.AlignLeft,
+                 bold=False, stretch=0) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setAlignment(align | Qt.AlignmentFlag.AlignVCenter)
+            style = f"color: {color}; font-size: 12px;"
+            if bold:
+                style += " font-weight: bold;"
+            lbl.setStyleSheet(style)
+            if width > 0:
+                lbl.setFixedWidth(width)
+            row_layout.addWidget(lbl, stretch)
+            return lbl
 
-            # Type
-            ctk.CTkLabel(
-                f, text=type_label,
-                font=ctk.CTkFont(size=10), text_color=icon_color,
-                width=100, anchor="center"
-            ).grid(row=0, column=3, padx=4)
+        # Icon
+        icon_lbl = QLabel(icon)
+        icon_lbl.setFixedWidth(40)
+        icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon_lbl.setStyleSheet(f"color: {icon_color}; font-size: 14px;")
+        row_layout.addWidget(icon_lbl)
 
-            # Size
-            ctk.CTkLabel(
-                f, text=_fmt(row.get("size_bytes", 0)),
-                font=ctk.CTkFont(size=11), text_color=TEXT_MUTED,
-                width=80, anchor="e"
-            ).grid(row=0, column=4, padx=4)
+        cell(row.get("_received", ""), 80, C_MUTED)
+        cell(row.get("filename", ""),   -1, C_TEXT, bold=True, stretch=1)
+        cell(type_label,               110, icon_color,
+             align=Qt.AlignmentFlag.AlignCenter)
+        cell(_fmt(row.get("size_bytes", 0)), 80, C_MUTED,
+             align=Qt.AlignmentFlag.AlignRight)
 
-            # Status
-            status_color = WARNING if is_dup else SUCCESS
-            ctk.CTkLabel(
-                f, text="Duplicate" if is_dup else "✓ Saved",
-                font=ctk.CTkFont(size=10, weight="bold"),
-                text_color=status_color, width=90, anchor="center"
-            ).grid(row=0, column=5, padx=(4, 8))
+        # Status badge
+        badge = QLabel("Duplicate" if is_dup else "✓ Saved")
+        badge.setFixedWidth(90)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(
+            f"color: {C_WARNING if is_dup else C_SUCCESS}; "
+            f"font-size: 10px; font-weight: bold;")
+        row_layout.addWidget(badge)
+
+        return f
