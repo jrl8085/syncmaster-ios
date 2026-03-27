@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional
 from fastapi import APIRouter, Depends
 from ..auth import verify_api_key
+from ..config import get_config
 from ..storage import manifest_db
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
@@ -10,6 +11,19 @@ router = APIRouter(dependencies=[Depends(verify_api_key)])
 async def get_manifest(since: Optional[str] = None):
     files = await manifest_db.get_manifest(since=since)
     return {"count": len(files), "generated_at": datetime.utcnow().isoformat() + "Z", "files": files}
+
+@router.delete("/manifest")
+async def reset_manifest():
+    await manifest_db.reset_manifest()
+    return {"status": "ok", "message": "Manifest cleared"}
+
+@router.post("/manifest/reconcile")
+async def reconcile_manifest():
+    """Prune manifest entries whose files were deleted from disk."""
+    storage_path = get_config()["storage_path"]
+    pruned = await manifest_db.reconcile_with_filesystem(storage_path)
+    total = await manifest_db.get_total_count()
+    return {"status": "ok", "pruned": pruned, "remaining": total}
 
 @router.post("/sync/complete")
 async def sync_complete(body: dict):

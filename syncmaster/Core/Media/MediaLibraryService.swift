@@ -24,20 +24,31 @@ final class MediaLibraryService: ObservableObject {
     func loadAssets() async {
         isLoading = true
         defer { isLoading = false }
-        let opts = PHFetchOptions()
-        opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-        opts.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
-        let result = PHAsset.fetchAssets(with: opts)
-        var items: [MediaItem] = []
-        items.reserveCapacity(result.count)
-        result.enumerateObjects { asset, _, _ in
-            items.append(MediaItem(id: asset.localIdentifier, asset: asset,
-                                   mediaType: self.detectMediaType(for: asset)))
+        // Fetch and enumerate off the main thread so PHAssetResource access
+        // doesn't trigger "Missing prefetched properties" warnings.
+        // Only Sendable types (String, MediaType) cross the task boundary.
+        let pairs: [(String, MediaType)] = await Task.detached(priority: .userInitiated) {
+            let opts = PHFetchOptions()
+            opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            opts.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
+            let result = PHAsset.fetchAssets(with: opts)
+            var pairs: [(String, MediaType)] = []
+            pairs.reserveCapacity(result.count)
+            result.enumerateObjects { asset, _, _ in
+                pairs.append((asset.localIdentifier, MediaLibraryService.detectMediaType(for: asset)))
+            }
+            return pairs
+        }.value
+        // Re-fetch PHAsset handles on the main thread, preserving sort order.
+        var byID: [String: PHAsset] = Dictionary(minimumCapacity: pairs.count)
+        PHAsset.fetchAssets(withLocalIdentifiers: pairs.map(\.0), options: nil)
+            .enumerateObjects { asset, _, _ in byID[asset.localIdentifier] = asset }
+        allAssets = pairs.compactMap { id, type in
+            byID[id].map { MediaItem(id: id, asset: $0, mediaType: type) }
         }
-        allAssets = items
     }
 
-    func detectMediaType(for asset: PHAsset) -> MediaType {
+    nonisolated static func detectMediaType(for asset: PHAsset) -> MediaType {
         if asset.mediaSubtypes.contains(.photoLive) { return .livePhotoImage }
         if asset.mediaSubtypes.contains(.photoDepthEffect) { return .depthEffect }
         if asset.mediaType == .video {
@@ -59,6 +70,6 @@ final class MediaLibraryService: ObservableObject {
     }
 
     var totalCount: Int { allAssets.count }
-    var uploadedCount: Int { allAssets.filter { $0.isUploaded }.count }
-    var pendingCount: Int { allAssets.filter { $0.isPending }.count }
+    var photoCount: Int { allAssets.filter { !$0.isVideo }.count }
+    var videoCount: Int { allAssets.filter { $0.isVideo }.count }
 }

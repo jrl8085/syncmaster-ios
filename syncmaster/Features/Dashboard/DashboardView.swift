@@ -123,17 +123,24 @@ struct SyncStatusCard: View {
 
 struct StatisticsCard: View {
     @EnvironmentObject var mediaLibrary: MediaLibraryService
+    @EnvironmentObject var syncEngine: SyncEngine
+
+    var pendingCount: Int {
+        max(0, mediaLibrary.totalCount - syncEngine.syncedCount)
+    }
 
     var body: some View {
         DashCard {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Library").font(.headline)
+                Text("Library (\(mediaLibrary.totalCount))").font(.headline)
                 HStack {
-                    StatTile(value: "\(mediaLibrary.totalCount)", label: "Total", icon: "photo.stack", color: .blue)
+                    StatTile(value: "\(mediaLibrary.photoCount)", label: "Photos", icon: "photo", color: .blue)
                     Divider()
-                    StatTile(value: "\(mediaLibrary.uploadedCount)", label: "Backed Up", icon: "checkmark.icloud", color: .green)
+                    StatTile(value: "\(mediaLibrary.videoCount)", label: "Videos", icon: "video", color: .purple)
                     Divider()
-                    StatTile(value: "\(mediaLibrary.pendingCount)", label: "Pending", icon: "clock.arrow.circlepath", color: .orange)
+                    StatTile(value: "\(syncEngine.syncedCount)", label: "Backed Up", icon: "checkmark.icloud", color: .green)
+                    Divider()
+                    StatTile(value: "\(pendingCount)", label: "Pending", icon: "clock.arrow.circlepath", color: .orange)
                 }
             }
         }

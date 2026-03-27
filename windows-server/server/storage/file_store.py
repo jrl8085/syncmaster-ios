@@ -41,7 +41,7 @@ def _make_dest_dir(creation_date: Optional[str]) -> Path:
         dt = datetime.fromisoformat(creation_date.rstrip("Z")) if creation_date else datetime.utcnow()
     except ValueError:
         dt = datetime.utcnow()
-    d = get_storage_root() / f"{dt.year:04d}" / f"{dt.month:02d}" / f"{dt.day:02d}"
+    d = get_storage_root() / f"{dt.year:04d}"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

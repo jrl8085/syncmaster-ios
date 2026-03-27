@@ -121,7 +121,7 @@ struct PermissionsPage: View {
         }
         isRequesting = true
         Task {
-            await mediaLibrary.requestAuthorization()
+            _ = await mediaLibrary.requestAuthorization()
             isRequesting = false
             if isDenied {
                 showDeniedHint = true

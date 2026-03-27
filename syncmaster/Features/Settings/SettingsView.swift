@@ -79,7 +79,7 @@ struct SettingsView: View {
             .sheet(isPresented: $showingServerSetup) { ServerSetupView() }
             .confirmationDialog("Reset Sync State", isPresented: $showingResetConfirm, titleVisibility: .visible) {
                 Button("Reset", role: .destructive) {
-                    env.syncEngine.stopSync()
+                    Task { await env.syncEngine.resetSyncRecords() }
                 }
             } message: {
                 Text("Clears all backup records. Your files on the server are not deleted.")

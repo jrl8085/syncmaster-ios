@@ -16,16 +16,16 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
 from ..server.config import get_config, update_config
 from ..server.ssl_utils import get_local_ip
 
-# ── Palette ──────────────────────────────────────────────────────────────────
-C_BG          = "#0D1117"
-C_SIDEBAR     = "#090D14"
-C_SIDEBAR_SEL = "#1D4ED8"
-C_BORDER      = "#1F2937"
-C_ACCENT      = "#3B82F6"
-C_SUCCESS     = "#22C55E"
-C_DANGER      = "#EF4444"
-C_TEXT        = "#E5E7EB"
-C_MUTED       = "#6B7280"
+# ── Material 3 palette ───────────────────────────────────────────────────────
+C_BG          = "#0F1117"
+C_SIDEBAR     = "#080C14"
+C_SIDEBAR_SEL = "#1A56DB"
+C_BORDER      = "#1E2736"
+C_ACCENT      = "#1A73E8"
+C_SUCCESS     = "#34A853"
+C_DANGER      = "#EA4335"
+C_TEXT        = "#E8EAED"
+C_MUTED       = "#9AA0A6"
 
 NAV = [
     ("dashboard", "Dashboard",  "▣"),
@@ -45,9 +45,9 @@ QFrame#sidebar {{
     border-right: 1px solid {C_BORDER};
 }}
 QFrame#statusPill {{
-    background-color: #111827;
-    border-radius: 8px;
-    padding: 2px;
+    background-color: #0D1520;
+    border-radius: 10px;
+    border: 1px solid {C_BORDER};
 }}
 QFrame#divider {{
     background-color: {C_BORDER};
@@ -55,51 +55,56 @@ QFrame#divider {{
     min-height: 1px;
 }}
 
-/* ── Nav buttons ── */
+/* ── Nav buttons (Material 3 nav-rail style) ── */
 QPushButton#navBtn {{
     text-align: left;
     padding: 10px 16px 10px 20px;
-    border-radius: 9px;
+    border-radius: 28px;
     border: none;
     color: {C_MUTED};
-    font-size: 14px;
+    font-size: 13px;
+    font-family: "Segoe UI";
     background: transparent;
 }}
 QPushButton#navBtn:hover {{
-    background-color: #1F2937;
+    background-color: rgba(26,115,232,0.12);
     color: {C_TEXT};
 }}
 QPushButton#navBtn:checked {{
     background-color: {C_SIDEBAR_SEL};
     color: white;
-    font-weight: bold;
+    font-weight: 600;
 }}
 
-/* ── Cards ── */
+/* ── Cards (Material 3 elevated surface) ── */
 QFrame#card {{
-    background-color: #161B27;
-    border-radius: 12px;
-    border: 1px solid #1F2937;
+    background-color: #141921;
+    border-radius: 16px;
+    border: 1px solid {C_BORDER};
 }}
 QFrame#cardElevated {{
-    background-color: #1A2035;
-    border-radius: 10px;
+    background-color: #1A2235;
+    border-radius: 12px;
 }}
 
-/* ── Labels ── */
+/* ── Typography ── */
 QLabel#pageTitle {{
     color: {C_TEXT};
     font-size: 22px;
-    font-weight: bold;
+    font-weight: 600;
+    font-family: "Segoe UI";
+    letter-spacing: -0.3px;
 }}
 QLabel#pageSubtitle {{
     color: {C_MUTED};
     font-size: 13px;
+    font-family: "Segoe UI";
 }}
 QLabel#sectionTitle {{
     color: {C_TEXT};
-    font-size: 15px;
-    font-weight: bold;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: "Segoe UI";
 }}
 QLabel#sectionSub {{
     color: {C_MUTED};
@@ -107,125 +112,146 @@ QLabel#sectionSub {{
 }}
 QLabel#logoName {{
     color: {C_TEXT};
-    font-size: 16px;
-    font-weight: bold;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: "Segoe UI";
 }}
 QLabel#logoSub {{
     color: {C_MUTED};
     font-size: 10px;
 }}
 QLabel#statusDot {{
-    font-size: 10px;
+    font-size: 9px;
 }}
 QLabel#serverAddr {{
     color: {C_ACCENT};
-    font-size: 12px;
-    font-weight: bold;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: "Segoe UI";
 }}
 QLabel#footerLabel {{
     color: {C_MUTED};
     font-size: 10px;
 }}
 
-/* ── Stat tile ── */
+/* ── Stat tile (Material 3 card) ── */
 QFrame#statTile {{
-    background-color: #161B27;
-    border-radius: 12px;
-    border: 1px solid #1F2937;
+    background-color: #141921;
+    border-radius: 16px;
+    border: 1px solid {C_BORDER};
 }}
 QLabel#statValue {{
-    font-size: 26px;
-    font-weight: bold;
+    font-size: 28px;
+    font-weight: 700;
+    font-family: "Segoe UI";
     color: {C_TEXT};
 }}
 QLabel#statLabel {{
     font-size: 11px;
+    font-family: "Segoe UI";
     color: {C_MUTED};
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
 }}
 
 /* ── Feed / table rows ── */
 QFrame#feedRow {{
-    background-color: #1A2035;
+    background-color: #1A2235;
     border-radius: 8px;
 }}
 QFrame#feedRowAlt {{
-    background-color: #161B27;
+    background-color: #141921;
     border-radius: 8px;
 }}
 
-/* ── Scrollbar ── */
+/* ── Scrollbar (minimal Material style) ── */
 QScrollBar:vertical {{
     background: transparent;
-    width: 6px;
+    width: 5px;
+    margin: 4px 0;
 }}
 QScrollBar::handle:vertical {{
-    background: #374151;
+    background: #2D3A4F;
     border-radius: 3px;
+    min-height: 24px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: #3D4F6A;
 }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;
 }}
 
-/* ── Inputs ── */
+/* ── Inputs (Material filled style) ── */
 QLineEdit {{
-    background-color: #0F1117;
-    border: 1px solid {C_BORDER};
+    background-color: #0D1320;
+    border: none;
+    border-bottom: 2px solid {C_BORDER};
     border-radius: 6px;
     color: {C_TEXT};
-    padding: 6px 10px;
+    padding: 8px 12px;
     font-size: 13px;
+    font-family: "Segoe UI";
 }}
 QLineEdit:focus {{
-    border-color: {C_ACCENT};
+    border-bottom-color: {C_ACCENT};
+    background-color: #111826;
 }}
 
-/* ── Buttons ── */
+/* ── Buttons (Material 3 filled / tonal) ── */
 QPushButton#primaryBtn {{
     background-color: {C_ACCENT};
     color: white;
     border: none;
-    border-radius: 8px;
-    padding: 10px 24px;
+    border-radius: 20px;
+    padding: 10px 28px;
     font-size: 14px;
-    font-weight: bold;
+    font-weight: 600;
+    font-family: "Segoe UI";
 }}
 QPushButton#primaryBtn:hover {{
-    background-color: #2563EB;
+    background-color: #1557B0;
+}}
+QPushButton#primaryBtn:pressed {{
+    background-color: #1045A0;
 }}
 QPushButton#secondaryBtn {{
-    background-color: #1F2937;
+    background-color: #1A2235;
     color: {C_TEXT};
     border: 1px solid {C_BORDER};
-    border-radius: 8px;
-    padding: 8px 16px;
+    border-radius: 20px;
+    padding: 8px 20px;
     font-size: 13px;
+    font-family: "Segoe UI";
 }}
 QPushButton#secondaryBtn:hover {{
-    background-color: #374151;
+    background-color: #223048;
+    border-color: #2D3A50;
 }}
 QPushButton#ghostBtn {{
     background-color: transparent;
     color: {C_MUTED};
     border: 1px solid {C_BORDER};
-    border-radius: 8px;
-    padding: 8px 16px;
+    border-radius: 20px;
+    padding: 8px 20px;
     font-size: 13px;
 }}
 QPushButton#ghostBtn:hover {{
-    background-color: #1F2937;
+    background-color: rgba(26,115,232,0.08);
     color: {C_TEXT};
+    border-color: {C_ACCENT};
 }}
 
 /* ── Table header ── */
 QFrame#tableHeader {{
     background-color: #0D1117;
-    border-radius: 0px;
     border-bottom: 1px solid {C_BORDER};
 }}
 QLabel#colHeader {{
     color: {C_MUTED};
     font-size: 10px;
-    font-weight: bold;
+    font-weight: 700;
+    font-family: "Segoe UI";
     letter-spacing: 1px;
 }}
 """
@@ -419,27 +445,38 @@ class SyncMasterWindow(QMainWindow):
     # ── Events ────────────────────────────────────────────────────────────────
 
     def _poll_events(self):
+        """Drain the queue each tick. Batch all upload events so widget
+        creation stays O(1) per tick regardless of upload burst size."""
+        upload_events: list[dict] = []
         try:
             while True:
                 event = self.event_queue.get_nowait()
-                self._handle_event(event)
+                t = event.get("type")
+                if t == "upload":
+                    upload_events.append(event)
+                elif t == "server_status":
+                    running = event.get("running", True)
+                    self._status_lbl.setText(
+                        "Server running" if running else "Server stopped")
+                    self._dot.setStyleSheet(
+                        f"color: {C_SUCCESS if running else C_DANGER}; font-size: 9px;")
         except Exception:
             pass
 
-    def _handle_event(self, event: dict):
-        t = event.get("type")
-        if t == "upload":
-            self._upload_total += 1
-            self._tabs["dashboard"].on_upload(event)
-            self._tabs["history"].on_upload(event)
-            if self._tray:
-                self._tray.setToolTip(
-                    f"SyncMaster · {self._upload_total} files received")
-        elif t == "server_status":
-            running = event.get("running", True)
-            self._status_lbl.setText("Server running" if running else "Server stopped")
-            self._dot.setStyleSheet(
-                f"color: {C_SUCCESS if running else C_DANGER}; font-size: 10px;")
+        if not upload_events:
+            return
+
+        batch_count = len(upload_events)
+        self._upload_total += batch_count
+        last = upload_events[-1]
+
+        # Forward only the last event for widget rendering; pass full count
+        # so history/dashboard labels stay accurate even when events are batched.
+        self._tabs["dashboard"].on_upload(last, batch_count=batch_count)
+        self._tabs["history"].on_upload(last, batch_count=batch_count)
+        if self._tray:
+            self._tray.setToolTip(
+                f"SyncMaster · {self._upload_total} files received")
 
     # ── System tray ───────────────────────────────────────────────────────────
 

@@ -1,4 +1,7 @@
 import Foundation
+import OSLog
+
+private let log = Logger(subsystem: "com.syncmaster", category: "SyncAPIClient")
 
 enum APIError: LocalizedError {
     case noServerConfigured
@@ -116,25 +119,62 @@ actor SyncAPIClient {
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
 
-        let isoDate = creationDate.map { ISO8601DateFormatter().string(from: $0) } ?? ""
-        var body = Data()
-        func field(_ name: String, _ value: String) {
-            body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".data(using: .utf8)!)
-        }
-        field("identifier", identifier)
-        field("filename", filename)
-        field("media_type", mediaType.rawValue)
-        field("creation_date", isoDate)
-        field("sha256", sha256)
-        field("size_bytes", String(sizeBytes))
-        body.append("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n".data(using: .utf8)!)
-        body.append(try Data(contentsOf: fileURL))
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        req.httpBody = body
+        // Stream multipart body to a temp file to avoid loading large files into RAM.
+        let tempFile = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString + ".multipart")
+        defer { try? FileManager.default.removeItem(at: tempFile) }
 
-        let (data, response) = try await session().data(for: req)
+        FileManager.default.createFile(atPath: tempFile.path, contents: nil)
+        let writer = try FileHandle(forWritingTo: tempFile)
+
+        func writeString(_ s: String) throws {
+            try writer.write(contentsOf: Data(s.utf8))
+        }
+        let isoDate = creationDate.map { ISO8601DateFormatter().string(from: $0) } ?? ""
+        func writeField(_ name: String, _ value: String) throws {
+            try writeString("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n")
+        }
+        try writeField("identifier", identifier)
+        try writeField("filename", filename)
+        try writeField("media_type", mediaType.rawValue)
+        try writeField("creation_date", isoDate)
+        try writeField("sha256", sha256)
+        try writeField("size_bytes", String(sizeBytes))
+        try writeString("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+
+        // Copy file payload in 1 MB chunks.
+        let reader = try FileHandle(forReadingFrom: fileURL)
+        let chunkSize = 1024 * 1024
+        while true {
+            let chunk = reader.readData(ofLength: chunkSize)
+            if chunk.isEmpty { break }
+            try writer.write(contentsOf: chunk)
+        }
+        try reader.close()
+        try writeString("\r\n--\(boundary)--\r\n")
+        try writer.close()
+
+        let (data, response) = try await session().upload(for: req, fromFile: tempFile)
         try validateResponse(response, data: data)
         return try decode(UploadResponse.self, from: data)
+    }
+
+    /// Tells the server to prune manifest entries whose files no longer exist on disk.
+    /// Call at the start of sync so deleted-on-server assets are re-uploaded.
+    func reconcileServerManifest() async throws -> Int {
+        let data = try await post("manifest/reconcile", json: [:])
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let pruned = json["pruned"] as? Int { return pruned }
+        return 0
+    }
+
+    func resetServerManifest() async throws {
+        guard let serverURL = await settings.serverURL else { throw APIError.noServerConfigured }
+        var req = URLRequest(url: serverURL.appendingPathComponent("manifest"))
+        req.httpMethod = "DELETE"
+        req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
+        let (data, response) = try await session().data(for: req)
+        try validateResponse(response, data: data)
     }
 
     func recordSyncSession(sessionId: UUID, startedAt: Date, completedAt: Date,
@@ -160,7 +200,10 @@ actor SyncAPIClient {
             try validateResponse(response, data: data)
             return data
         } catch let e as APIError { throw e
-        } catch { throw APIError.networkError(error) }
+        } catch {
+            log.error("GET \(path) failed: \(error.localizedDescription)")
+            throw APIError.networkError(error)
+        }
     }
 
     private func post(_ path: String, json: [String: Any]) async throws -> Data {

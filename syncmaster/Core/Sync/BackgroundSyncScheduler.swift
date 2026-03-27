@@ -17,7 +17,7 @@ final class BackgroundSyncScheduler {
         let req = BGProcessingTaskRequest(identifier: taskID)
         req.requiresNetworkConnectivity = true
         req.requiresExternalPower = UserDefaults.standard.bool(forKey: "syncOnCharging")
-        req.earliestBeginDate = Date(timeIntervalSinceNow: 3600)
+        req.earliestBeginDate = Date(timeIntervalSinceNow: 86400) // recheck once per day
         try? BGTaskScheduler.shared.submit(req)
     }
 

@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
                               QFileDialog, QSizePolicy)
 
 from ...server.config import get_config, update_config
-from ...server.ssl_utils import get_cert_fingerprint, get_local_ip
+from ...server.ssl_utils import get_cert_fingerprint, get_local_ip, get_all_local_ips
 
 C_SUCCESS = "#22C55E"
 C_WARNING = "#F59E0B"
@@ -115,18 +115,20 @@ class SettingsTab(QWidget):
 
         cl.addSpacing(8)
 
-        ip_row = QHBoxLayout()
-        ip_row.setSpacing(12)
-        ip_label = QLabel("Local IP")
-        ip_label.setStyleSheet(f"color: {C_MUTED}; font-size: 13px;")
-        ip_label.setFixedWidth(60)
-        ip_val = QLabel(get_local_ip())
-        ip_val.setStyleSheet(
-            f"color: {C_ACCENT}; font-size: 13px; font-weight: bold;")
-        ip_row.addWidget(ip_label)
-        ip_row.addWidget(ip_val)
-        ip_row.addStretch()
-        cl.addLayout(ip_row)
+        all_ips = get_all_local_ips()
+        for i, ip in enumerate(all_ips):
+            ip_row = QHBoxLayout()
+            ip_row.setSpacing(12)
+            ip_label = QLabel("Local IP" if i == 0 else "")
+            ip_label.setStyleSheet(f"color: {C_MUTED}; font-size: 13px;")
+            ip_label.setFixedWidth(60)
+            ip_val = QLabel(ip)
+            ip_val.setStyleSheet(
+                f"color: {C_ACCENT}; font-size: 13px; font-weight: bold;")
+            ip_row.addWidget(ip_label)
+            ip_row.addWidget(ip_val)
+            ip_row.addStretch()
+            cl.addLayout(ip_row)
 
         self._cl.addWidget(card)
         self._cl.addSpacing(8)

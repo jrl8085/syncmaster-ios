@@ -1,7 +1,10 @@
 import Foundation
-import Photos
+@preconcurrency import Photos
 import CryptoKit
 import AVFoundation
+import OSLog
+
+private let log = Logger(subsystem: "com.syncmaster", category: "AssetExporter")
 
 enum ExportError: LocalizedError {
     case exportFailed(String)
@@ -39,12 +42,21 @@ final class AssetExporter {
         }
     }
 
+    // MARK: - Helpers (background-thread resource access)
+
+    /// Fetches asset resources on a background thread to avoid
+    /// "Missing prefetched properties" warnings on the main queue.
+    nonisolated private func fetchResources(for asset: PHAsset) async -> [PHAssetResource] {
+        await Task.detached { PHAssetResource.assetResources(for: asset) }.value
+    }
+
     // MARK: - Image
 
     private func exportImage(asset: PHAsset, mediaType: MediaType) async throws -> [ExportedFile] {
         var results: [ExportedFile] = []
-        let resources = PHAssetResource.assetResources(for: asset)
+        let resources = await fetchResources(for: asset)
         let id = asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
+        log.debug("exportImage: \(resources.count) resource(s) for asset \(id)")
 
         if let primary = resources.first(where: { $0.type == .photo || $0.type == .fullSizePhoto }) {
             let filename = sanitize(primary.originalFilename)
@@ -70,8 +82,9 @@ final class AssetExporter {
     // MARK: - Video
 
     private func exportVideo(asset: PHAsset, mediaType: MediaType) async throws -> ExportedFile {
-        let resources = PHAssetResource.assetResources(for: asset)
+        let resources = await fetchResources(for: asset)
         let id = asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
+        log.debug("exportVideo: \(resources.count) resource(s) for asset \(id)")
 
         if let resource = resources.first(where: { $0.type == .video }) {
             let filename = sanitize(resource.originalFilename)
@@ -84,7 +97,7 @@ final class AssetExporter {
         // Fallback: AVAssetExportSession passthrough
         return try await withCheckedThrowingContinuation { cont in
             let opts = PHVideoRequestOptions()
-            opts.isNetworkAccessAllowed = false
+            opts.isNetworkAccessAllowed = true  // allow iCloud download for cloud-only assets
             opts.deliveryMode = .highQualityFormat
             opts.version = .original
             PHImageManager.default().requestExportSession(
@@ -123,10 +136,14 @@ final class AssetExporter {
         try? FileManager.default.removeItem(at: url)
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             let opts = PHAssetResourceRequestOptions()
-            opts.isNetworkAccessAllowed = false
+            opts.isNetworkAccessAllowed = true  // allow iCloud download for cloud-only assets
             PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: opts) { err in
-                if let err { cont.resume(throwing: ExportError.exportFailed(err.localizedDescription)) }
-                else { cont.resume() }
+                if let err {
+                    log.error("writeResource failed for \(resource.originalFilename): \(err.localizedDescription)")
+                    cont.resume(throwing: ExportError.exportFailed(err.localizedDescription))
+                } else {
+                    cont.resume()
+                }
             }
         }
     }

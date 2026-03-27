@@ -87,6 +87,25 @@ async def insert_session(s: dict):
             "INSERT OR REPLACE INTO sync_sessions (id,started_at,completed_at,files_uploaded,bytes_transferred,skipped_duplicates,errors) VALUES (:session_id,:started_at,:completed_at,:files_uploaded,:bytes_transferred,:skipped_duplicates,:errors)",
             s); await db.commit()
 
+async def reconcile_with_filesystem(storage_path) -> int:
+    """Remove manifest entries whose files no longer exist on disk. Returns pruned count."""
+    from pathlib import Path
+    base = Path(storage_path)
+    async with aiosqlite.connect(_DB) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT identifier, stored_path FROM files") as c:
+            rows = [dict(r) for r in await c.fetchall()]
+        stale = [r["identifier"] for r in rows if not (base / r["stored_path"]).exists()]
+        if stale:
+            await db.executemany("DELETE FROM files WHERE identifier=?", [(i,) for i in stale])
+            await db.commit()
+    return len(stale)
+
+async def reset_manifest():
+    async with aiosqlite.connect(_DB) as db:
+        await db.execute("DELETE FROM files")
+        await db.commit()
+
 async def get_recent_sessions(limit=20) -> list[dict]:
     async with aiosqlite.connect(_DB) as db:
         db.row_factory = aiosqlite.Row

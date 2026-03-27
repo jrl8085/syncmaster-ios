@@ -193,8 +193,8 @@ class DashboardTab(QWidget):
 
     # ── Upload event ──────────────────────────────────────────────────────────
 
-    def on_upload(self, event: dict):
-        self._files += 1
+    def on_upload(self, event: dict, batch_count: int = 1):
+        self._files += batch_count
         self._bytes += event.get("size_bytes", 0)
 
         self._stat_labels["files"].setText(str(self._files))

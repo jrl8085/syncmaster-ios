@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import Photos
 
 @MainActor
 final class AppEnvironment: ObservableObject {
@@ -36,7 +37,27 @@ final class AppEnvironment: ObservableObject {
         self.mediaLibrary = mediaLibrary
         self.syncEngine = syncEngine
 
+        networkMonitor.configure(settings: settings)
         setupAutoSync()
+        Task { await syncEngine.refreshSyncedCount() }
+        setupServerCountRefresh()
+        // Populate photo/video counts immediately if permission was already granted.
+        let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        if authStatus == .authorized || authStatus == .limited {
+            Task { await mediaLibrary.loadAssets() }
+        }
+    }
+
+    private func setupServerCountRefresh() {
+        // Once the server becomes reachable, fetch the manifest to get an accurate
+        // backed-up count (server is source of truth, not the local tracker).
+        networkMonitor.$serverReachable
+            .filter { $0 }
+            .first()
+            .sink { [weak self] _ in
+                Task { await self?.syncEngine.refreshSyncedCountFromServer() }
+            }
+            .store(in: &cancellables)
     }
 
     private func setupAutoSync() {

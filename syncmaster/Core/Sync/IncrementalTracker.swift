@@ -54,8 +54,19 @@ actor IncrementalTracker {
         }
     }
 
-    func backfillFromServer(identifiers: [String]) async {
-        for id in identifiers { uploaded.insert(id) }
+    /// Reconciles local state with the server manifest.
+    /// Sets the in-memory uploaded set to exactly what the server has,
+    /// and prunes Core Data records for identifiers no longer on the server.
+    func reconcileWithServer(identifiers: [String]) async {
+        let serverSet = Set(identifiers)
+        uploaded = serverSet
+        let ctx = persistence.newBackgroundContext()
+        await ctx.perform {
+            let req = NSFetchRequest<NSFetchRequestResult>(entityName: "SMUploadRecord")
+            req.predicate = NSPredicate(format: "NOT (identifier IN %@)", Array(serverSet))
+            _ = try? ctx.execute(NSBatchDeleteRequest(fetchRequest: req))
+            _ = try? ctx.save()
+        }
     }
 
     func reset() async {
@@ -72,5 +83,20 @@ actor IncrementalTracker {
     func uploadedCount() async -> Int {
         if !loaded { await preload() }
         return uploaded.count
+    }
+
+    /// Returns true only when all expected components of an asset are uploaded.
+    /// For live photos, both the image and the paired video must be present.
+    func isFullyUploaded(identifier: String, isLivePhoto: Bool) async -> Bool {
+        if !loaded { await preload() }
+        guard uploaded.contains(identifier) else { return false }
+        if isLivePhoto { return uploaded.contains(identifier + "-video") }
+        return true
+    }
+
+    /// Count of unique assets synced, excluding the paired-video component of live photos.
+    func syncedAssetCount() async -> Int {
+        if !loaded { await preload() }
+        return uploaded.filter { !$0.hasSuffix("-video") }.count
     }
 }

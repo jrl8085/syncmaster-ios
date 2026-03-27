@@ -71,7 +71,9 @@ final class FingerprintCapturingDelegate: NSObject, URLSessionDelegate {
     static func capture(from url: URL) async throws -> String {
         let delegate = FingerprintCapturingDelegate()
         let session = URLSession(configuration: .ephemeral, delegate: delegate, delegateQueue: nil)
-        _ = try? await session.data(for: URLRequest(url: url.appendingPathComponent("health")))
+        var req = URLRequest(url: url.appendingPathComponent("health"))
+        req.timeoutInterval = 10
+        _ = try await session.data(for: req)
         return delegate.capturedFingerprint ?? ""
     }
 }
