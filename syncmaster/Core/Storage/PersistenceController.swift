@@ -36,8 +36,8 @@ final class PersistenceController {
     private static func buildModel() -> NSManagedObjectModel {
         let model = NSManagedObjectModel()
         let entity = NSEntityDescription()
-        entity.name = "UploadRecord"
-        entity.managedObjectClassName = NSStringFromClass(UploadRecord.self)
+        entity.name = "SMUploadRecord"
+        entity.managedObjectClassName = NSStringFromClass(SMUploadRecord.self)
 
         func attr(_ name: String, type: NSAttributeType, optional: Bool = false) -> NSAttributeDescription {
             let a = NSAttributeDescription()
@@ -60,8 +60,8 @@ final class PersistenceController {
     }
 }
 
-@objc(UploadRecord)
-final class UploadRecord: NSManagedObject {
+@objc(SMUploadRecord)
+final class SMUploadRecord: NSManagedObject {
     @NSManaged var identifier: String
     @NSManaged var filename: String
     @NSManaged var sha256: String
@@ -71,11 +71,11 @@ final class UploadRecord: NSManagedObject {
     @NSManaged var serverURL: String
     @NSManaged var modificationDate: Date?
 
-    static func fetchRequest() -> NSFetchRequest<UploadRecord> {
-        NSFetchRequest<UploadRecord>(entityName: "UploadRecord")
+    static func fetchRequest() -> NSFetchRequest<SMUploadRecord> {
+        NSFetchRequest<SMUploadRecord>(entityName: "SMUploadRecord")
     }
 
     static func entity(in context: NSManagedObjectContext) -> NSEntityDescription {
-        NSEntityDescription.entity(forEntityName: "UploadRecord", in: context)!
+        NSEntityDescription.entity(forEntityName: "SMUploadRecord", in: context)!
     }
 }

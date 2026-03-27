@@ -15,7 +15,7 @@ actor IncrementalTracker {
         let ctx = persistence.newBackgroundContext()
         // Collect identifiers inside the Sendable perform closure, then assign outside it
         let identifiers: Set<String> = await ctx.perform {
-            let req = UploadRecord.fetchRequest()
+            let req = SMUploadRecord.fetchRequest()
             req.propertiesToFetch = ["identifier"]
             let records = (try? ctx.fetch(req)) ?? []
             return Set(records.map { $0.identifier })
@@ -41,7 +41,7 @@ actor IncrementalTracker {
         uploaded.insert(identifier)
         let ctx = persistence.newBackgroundContext()
         await ctx.perform {
-            let r = UploadRecord(entity: UploadRecord.entity(in: ctx), insertInto: ctx)
+            let r = SMUploadRecord(entity: SMUploadRecord.entity(in: ctx), insertInto: ctx)
             r.identifier = identifier
             r.filename = filename
             r.sha256 = sha256
@@ -62,7 +62,7 @@ actor IncrementalTracker {
         uploaded.removeAll()
         let ctx = persistence.newBackgroundContext()
         await ctx.perform {
-            let req = NSFetchRequest<NSFetchRequestResult>(entityName: "UploadRecord")
+            let req = NSFetchRequest<NSFetchRequestResult>(entityName: "SMUploadRecord")
             _ = try? ctx.execute(NSBatchDeleteRequest(fetchRequest: req))
             _ = try? ctx.save()
         }
