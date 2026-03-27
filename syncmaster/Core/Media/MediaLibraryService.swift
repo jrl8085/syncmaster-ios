@@ -29,6 +29,7 @@ final class MediaLibraryService: ObservableObject {
         opts.includeAssetSourceTypes = [.typeUserLibrary, .typeCloudShared, .typeiTunesSynced]
         let result = PHAsset.fetchAssets(with: opts)
         var items: [MediaItem] = []
+        items.reserveCapacity(result.count)
         result.enumerateObjects { asset, _, _ in
             items.append(MediaItem(id: asset.localIdentifier, asset: asset,
                                    mediaType: self.detectMediaType(for: asset)))

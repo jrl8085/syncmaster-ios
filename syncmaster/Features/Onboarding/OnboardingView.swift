@@ -54,7 +54,17 @@ struct WelcomePage: View {
 
 struct PermissionsPage: View {
     @EnvironmentObject var mediaLibrary: MediaLibraryService
+    @Environment(\.openURL) private var openURL
     let onNext: () -> Void
+
+    @State private var isRequesting = false
+    @State private var showDeniedHint = false
+
+    private var isDenied: Bool {
+        mediaLibrary.authorizationStatus == .denied ||
+        mediaLibrary.authorizationStatus == .restricted
+    }
+
     var body: some View {
         VStack(spacing: 24) {
             Spacer()
@@ -64,20 +74,60 @@ struct PermissionsPage: View {
             Text("SyncMaster needs access to your entire photo library to back up all your memories.")
                 .font(.body).foregroundStyle(.secondary)
                 .multilineTextAlignment(.center).padding(.horizontal, 32)
+            if showDeniedHint {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+                    Text("Access denied. Enable it in Settings → Privacy → Photos.")
+                }
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            }
             Spacer()
             VStack(spacing: 12) {
                 Button {
-                    Task {
-                        let s = await mediaLibrary.requestAuthorization()
-                        if s == .authorized || s == .limited { onNext() }
-                    }
+                    handleButtonTap()
                 } label: {
-                    Text("Allow Access").font(.headline).frame(maxWidth: .infinity).padding()
+                    buttonContent
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding()
                         .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 14))
                         .foregroundStyle(.white)
                 }
+                .disabled(isRequesting)
                 Button("Skip for Now", action: onNext).foregroundStyle(.secondary)
             }.padding(.horizontal, 32).padding(.bottom, 40)
+        }
+    }
+
+    @ViewBuilder private var buttonContent: some View {
+        if isRequesting {
+            ProgressView().tint(.white)
+        } else if isDenied {
+            Text("Open Settings")
+        } else {
+            Text("Allow Access")
+        }
+    }
+
+    private func handleButtonTap() {
+        guard !isRequesting else { return }
+        if isDenied {
+            openURL(URL(string: "app-settings:")!)
+            showDeniedHint = true
+            return
+        }
+        isRequesting = true
+        Task {
+            await mediaLibrary.requestAuthorization()
+            isRequesting = false
+            if isDenied {
+                showDeniedHint = true
+            } else {
+                onNext()
+            }
         }
     }
 }
