@@ -1,0 +1,42 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Xcode
+*.xcuserstate
+*.xcworkspace/xcuserdata/
+xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+build/
+
+# Python / Windows server
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+*.egg
+venv/
+.venv/
+env/
+.env
+
+# SSL certs generated at runtime
+windows-server/*.pem
+windows-server/*.crt
+windows-server/*.key
+
+# App data
+~/AppData/Local/SyncMaster/
+
+# IDE
+.idea/
+.vscode/
+*.swp
