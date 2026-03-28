@@ -76,7 +76,7 @@ struct SyncStatusCard: View {
     var statusColor: Color {
         switch syncEngine.status {
         case .idle: return .secondary
-        case .scanning, .uploading: return .blue
+        case .indexing, .scanning, .uploading: return .blue
         case .completed: return .green
         case .failed: return .red
         case .paused: return .orange
@@ -125,8 +125,17 @@ struct StatisticsCard: View {
     @EnvironmentObject var mediaLibrary: MediaLibraryService
     @EnvironmentObject var syncEngine: SyncEngine
 
+    /// Effective backed-up count: whichever is larger — iOS-confirmed assets or
+    /// unique files on the server — capped at the library size.
+    /// This stays accurate even when the manifest was previously cleared and
+    /// server files haven't yet been re-confirmed by a new sync run.
+    var effectiveBacked: Int {
+        min(mediaLibrary.totalCount,
+            max(syncEngine.syncedCount, syncEngine.serverFileCount))
+    }
+
     var pendingCount: Int {
-        max(0, mediaLibrary.totalCount - syncEngine.syncedCount)
+        max(0, mediaLibrary.totalCount - effectiveBacked)
     }
 
     var body: some View {
@@ -138,7 +147,7 @@ struct StatisticsCard: View {
                     Divider()
                     StatTile(value: "\(mediaLibrary.videoCount)", label: "Videos", icon: "video", color: .purple)
                     Divider()
-                    StatTile(value: "\(syncEngine.syncedCount)", label: "Backed Up", icon: "checkmark.icloud", color: .green)
+                    StatTile(value: "\(effectiveBacked)", label: "Backed Up", icon: "checkmark.icloud", color: .green)
                     Divider()
                     StatTile(value: "\(pendingCount)", label: "Pending", icon: "clock.arrow.circlepath", color: .orange)
                 }

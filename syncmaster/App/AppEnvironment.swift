@@ -65,11 +65,19 @@ final class AppEnvironment: ObservableObject {
 
         // Also trigger immediately the first time the server becomes reachable
         // (covers cold launch where the notification may have already fired).
+        // If serverFileCount is 0 the manifest may be stale — run indexing first
+        // so any files already on disk are counted immediately.
         networkMonitor.$serverReachable
             .filter { $0 }
             .first()
             .sink { [weak self] _ in
-                Task { await self?.syncEngine.refreshSyncedCountFromServer() }
+                guard let self else { return }
+                Task {
+                    if self.syncEngine.serverFileCount == 0 {
+                        _ = try? await self.syncEngine.apiClient.indexServerFiles()
+                    }
+                    await self.syncEngine.refreshSyncedCountFromServer()
+                }
             }
             .store(in: &cancellables)
     }

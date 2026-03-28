@@ -108,11 +108,11 @@ final class SyncEngine: ObservableObject {
 
     func resetSyncRecords() async {
         stopSync()
-        // Clear the local tracker only — the server manifest is preserved as the source
-        // of truth so the file count stays accurate and we don't force unnecessary re-uploads.
         await tracker.reset()
         failedIdentifiers = []
-        // Refresh counts from the server so the display reflects reality immediately.
+        // Index the server filesystem before reading counts — ensures any files already on
+        // disk are reflected in the manifest even if the manifest DB was previously cleared.
+        _ = try? await apiClient.indexServerFiles()
         await refreshSyncedCountFromServer()
     }
 
