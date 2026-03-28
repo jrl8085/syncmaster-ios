@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFrame,
                               QLabel, QPushButton, QLineEdit, QScrollArea,
                               QFileDialog, QSizePolicy)
 
-from ...server.config import get_config, update_config
-from ...server.ssl_utils import get_cert_fingerprint, get_local_ip, get_all_local_ips
+from server.config import get_config, update_config
+from server.ssl_utils import get_cert_fingerprint, get_local_ip, get_all_local_ips
 
 C_SUCCESS = "#22C55E"
 C_WARNING = "#F59E0B"
@@ -171,23 +171,21 @@ class SettingsTab(QWidget):
         cl.addLayout(key_row)
 
         # Fingerprint display
-        fp = get_cert_fingerprint()
-        if fp:
-            cl.addSpacing(14)
-            fp_card = QFrame()
-            fp_card.setObjectName("cardElevated")
-            fp_layout = QVBoxLayout(fp_card)
-            fp_layout.setContentsMargins(14, 10, 14, 10)
-            fp_layout.setSpacing(4)
-            fp_title = QLabel("SSL Certificate Fingerprint")
-            fp_title.setStyleSheet(f"color: {C_MUTED}; font-size: 11px;")
-            fp_val = QLabel(fp)
-            fp_val.setFont(self._mono_font(10))
-            fp_val.setStyleSheet(f"color: {C_SUCCESS}; font-size: 10px;")
-            fp_val.setWordWrap(True)
-            fp_layout.addWidget(fp_title)
-            fp_layout.addWidget(fp_val)
-            cl.addWidget(fp_card)
+        cl.addSpacing(14)
+        fp_card = QFrame()
+        fp_card.setObjectName("cardElevated")
+        fp_layout = QVBoxLayout(fp_card)
+        fp_layout.setContentsMargins(14, 10, 14, 10)
+        fp_layout.setSpacing(4)
+        fp_title = QLabel("SSL Certificate Fingerprint")
+        fp_title.setStyleSheet(f"color: {C_MUTED}; font-size: 11px;")
+        self._fp_val = QLabel(get_cert_fingerprint() or "(no certificate yet)")
+        self._fp_val.setFont(self._mono_font(10))
+        self._fp_val.setStyleSheet(f"color: {C_SUCCESS}; font-size: 10px;")
+        self._fp_val.setWordWrap(True)
+        fp_layout.addWidget(fp_title)
+        fp_layout.addWidget(self._fp_val)
+        cl.addWidget(fp_card)
 
         # Regenerate cert button
         cl.addSpacing(12)
@@ -281,8 +279,9 @@ class SettingsTab(QWidget):
             3000, lambda: self._saved_lbl.setText(""))
 
     def _regen_cert(self):
-        from ...server.ssl_utils import generate_self_signed_cert
+        from server.ssl_utils import generate_self_signed_cert
         generate_self_signed_cert(force=True)
+        self._fp_val.setText(get_cert_fingerprint())
         self._saved_lbl.setText(
             "✓  New certificate generated — restart server to apply")
         self._saved_lbl.setStyleSheet(f"color: {C_WARNING}; font-size: 13px;")

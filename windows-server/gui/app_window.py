@@ -13,8 +13,8 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
                               QSizePolicy, QSystemTrayIcon, QMenu, QApplication,
                               QSpacerItem)
 
-from ..server.config import get_config, update_config
-from ..server.ssl_utils import get_local_ip
+from server.config import get_config, update_config
+from server.ssl_utils import get_local_ip
 
 # ── Material 3 palette ───────────────────────────────────────────────────────
 C_BG          = "#0F1117"
