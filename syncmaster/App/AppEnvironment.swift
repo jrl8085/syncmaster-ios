@@ -51,33 +51,24 @@ final class AppEnvironment: ObservableObject {
     }
 
     private func setupServerCountRefresh() {
-        // Refresh backed-up count from the server every time the app becomes active.
-        // This keeps the progress accurate across restarts and catches any manual
-        // changes on the server side (e.g. files deleted from the storage folder).
+        // Fires every time the app becomes active AND the server is already reachable.
         NotificationCenter.default
             .publisher(for: UIApplication.didBecomeActiveNotification)
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self, self.networkMonitor.serverReachable else { return }
-                Task { await self.syncEngine.refreshSyncedCountFromServer() }
+                Task { await self.syncEngine.refreshAndIndexIfNeeded() }
             }
             .store(in: &cancellables)
 
-        // Also trigger immediately the first time the server becomes reachable
-        // (covers cold launch where the notification may have already fired).
-        // If serverFileCount is 0 the manifest may be stale — run indexing first
-        // so any files already on disk are counted immediately.
+        // Fires every time the server transitions to reachable (covers cold launch
+        // where the active notification may have fired before reachability resolved).
         networkMonitor.$serverReachable
             .filter { $0 }
-            .first()
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                Task {
-                    if self.syncEngine.serverFileCount == 0 {
-                        _ = try? await self.syncEngine.apiClient.indexServerFiles()
-                    }
-                    await self.syncEngine.refreshSyncedCountFromServer()
-                }
+                Task { await self.syncEngine.refreshAndIndexIfNeeded() }
             }
             .store(in: &cancellables)
     }

@@ -69,7 +69,14 @@ final class SyncEngine: ObservableObject {
         guard let manifest = try? await apiClient.fetchManifest() else { return }
         await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
         syncedCount = manifest.files.filter { isConfirmedAsset($0) }.count
-        serverFileCount = Set(manifest.files.map { $0.sha256 }).count
+        serverFileCount = manifest.files.filter { isConfirmedAsset($0) }.count
+    }
+
+    func refreshAndIndexIfNeeded() async {
+        if serverFileCount == 0 {
+            _ = try? await apiClient.indexServerFiles()
+        }
+        await refreshSyncedCountFromServer()
     }
 
     /// True for manifest entries that represent a confirmed iOS asset —
@@ -145,7 +152,7 @@ final class SyncEngine: ObservableObject {
                 log.info("Server manifest: \(manifest.count) file(s) already on server")
                 await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
                 syncedCount = manifest.files.filter { isConfirmedAsset($0) }.count
-                serverFileCount = Set(manifest.files.map { $0.sha256 }).count
+                serverFileCount = manifest.files.filter { isConfirmedAsset($0) }.count
             } else {
                 log.warning("Could not fetch server manifest — using local tracker")
                 syncedCount = await tracker.syncedAssetCount()
