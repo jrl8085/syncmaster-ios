@@ -67,7 +67,7 @@ final class BackgroundSyncScheduler {
         task.expirationHandler = {
             log.warning("BGProcessingTask: expired — cancelling sync")
             workTask.cancel()
-            AppEnvironment.shared.syncEngine.pauseSync()
+            Task { @MainActor in AppEnvironment.shared.syncEngine.pauseSync() }
             task.setTaskCompleted(success: false)
         }
     }
@@ -86,7 +86,7 @@ final class BackgroundSyncScheduler {
         task.expirationHandler = {
             log.warning("BGAppRefreshTask: expired — cancelling")
             workTask.cancel()
-            AppEnvironment.shared.syncEngine.pauseSync()
+            Task { @MainActor in AppEnvironment.shared.syncEngine.pauseSync() }
             task.setTaskCompleted(success: false)
         }
     }
