@@ -151,9 +151,19 @@ struct ThumbnailCell: View {
             opts.deliveryMode = .opportunistic
             opts.isNetworkAccessAllowed = true
             opts.resizeMode = .fast
+            var resumed = false
             PHImageManager.default().requestImage(
                 for: item.asset, targetSize: CGSize(width: 150, height: 150),
-                contentMode: .aspectFill, options: opts) { img, _ in cont.resume(returning: img) }
+                contentMode: .aspectFill, options: opts
+            ) { img, info in
+                // .opportunistic fires twice (degraded preview, then final).
+                // Only resume on the final result to avoid crashing the continuation.
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                if !isDegraded, !resumed {
+                    resumed = true
+                    cont.resume(returning: img)
+                }
+            }
         }
     }
 }

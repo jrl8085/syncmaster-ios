@@ -31,6 +31,8 @@ final class AssetExporter {
     init() {
         tempDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("syncmaster", isDirectory: true)
+        // Remove any stale temp files left by a previous crash before starting fresh.
+        try? FileManager.default.removeItem(at: tempDir)
         try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
     }
 
