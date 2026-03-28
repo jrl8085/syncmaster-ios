@@ -9,7 +9,7 @@ import uvicorn
 from PyQt6.QtWidgets import QApplication
 
 from server.config import get_config
-from server.ssl_utils import generate_self_signed_cert, get_local_ip
+from server.ssl_utils import generate_self_signed_cert, cert_covers_current_ip, get_local_ip
 from server.app import create_app
 
 EXTRA_THEME = {
@@ -26,7 +26,7 @@ EXTRA_THEME = {
 
 
 def main():
-    cert_file, key_file = generate_self_signed_cert()
+    cert_file, key_file = generate_self_signed_cert(force=not cert_covers_current_ip())
     event_queue: queue.Queue = queue.Queue(maxsize=500)
     cfg = get_config()
 

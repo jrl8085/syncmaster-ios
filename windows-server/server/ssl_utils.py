@@ -107,6 +107,19 @@ def generate_self_signed_cert(force: bool = False) -> tuple[Path, Path]:
     return CERT_FILE, KEY_FILE
 
 
+def cert_covers_current_ip() -> bool:
+    """Return True if the existing cert's SAN includes the current primary LAN IP."""
+    if not CERT_FILE.exists():
+        return False
+    try:
+        cert = x509.load_pem_x509_certificate(CERT_FILE.read_bytes(), default_backend())
+        san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName)
+        cert_ips = {str(ip) for ip in san.value.get_values_for_type(x509.IPAddress)}
+        return get_local_ip() in cert_ips
+    except Exception:
+        return False
+
+
 def get_cert_fingerprint() -> str:
     if not CERT_FILE.exists():
         return ""
