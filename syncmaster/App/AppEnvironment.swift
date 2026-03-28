@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import Photos
+import UIKit
 
 @MainActor
 final class AppEnvironment: ObservableObject {
@@ -41,6 +42,7 @@ final class AppEnvironment: ObservableObject {
         setupAutoSync()
         Task { await syncEngine.refreshSyncedCount() }
         setupServerCountRefresh()
+        setupCertAutoValidation()
         // Populate photo/video counts immediately if permission was already granted.
         let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if authStatus == .authorized || authStatus == .limited {
@@ -49,13 +51,41 @@ final class AppEnvironment: ObservableObject {
     }
 
     private func setupServerCountRefresh() {
-        // Once the server becomes reachable, fetch the manifest to get an accurate
-        // backed-up count (server is source of truth, not the local tracker).
+        // Refresh backed-up count from the server every time the app becomes active.
+        // This keeps the progress accurate across restarts and catches any manual
+        // changes on the server side (e.g. files deleted from the storage folder).
+        NotificationCenter.default
+            .publisher(for: UIApplication.didBecomeActiveNotification)
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, self.networkMonitor.serverReachable else { return }
+                Task { await self.syncEngine.refreshSyncedCountFromServer() }
+            }
+            .store(in: &cancellables)
+
+        // Also trigger immediately the first time the server becomes reachable
+        // (covers cold launch where the notification may have already fired).
         networkMonitor.$serverReachable
             .filter { $0 }
             .first()
             .sink { [weak self] _ in
                 Task { await self?.syncEngine.refreshSyncedCountFromServer() }
+            }
+            .store(in: &cancellables)
+    }
+
+    private func setupCertAutoValidation() {
+        NotificationCenter.default
+            .publisher(for: UIApplication.didBecomeActiveNotification)
+            .debounce(for: .seconds(2), scheduler: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self, let serverURL = self.settings.serverURL else { return }
+                Task {
+                    guard let fp = try? await FingerprintCapturingDelegate.capture(from: serverURL),
+                          !fp.isEmpty, fp != self.settings.sslFingerprint else { return }
+                    self.settings.sslFingerprint = fp
+                    await self.syncEngine.apiClient.invalidateSession()
+                }
             }
             .store(in: &cancellables)
     }

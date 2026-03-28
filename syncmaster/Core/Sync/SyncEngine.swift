@@ -21,7 +21,7 @@ enum SyncStatus: Equatable {
         switch self {
         case .idle: return "Ready to sync"
         case .scanning: return "Scanning library…"
-        case .uploading(let cur, let tot, let name): return "Uploading \(cur) of \(tot): \(name)"
+        case .uploading(let cur, let tot, _): return "Uploading \(cur) of \(tot)"
         case .paused: return "Paused"
         case .completed(let u, let s, let f): return "Done — \(u) uploaded, \(s) skipped, \(f) failed"
         case .failed(let e): return "Error: \(e)"
@@ -34,7 +34,9 @@ final class SyncEngine: ObservableObject {
     @Published private(set) var status: SyncStatus = .idle
     @Published private(set) var currentSession: SyncSession?
     @Published private(set) var overallProgress: Double = 0
-    @Published private(set) var syncedCount: Int = 0
+    @Published private(set) var syncedCount: Int = UserDefaults.standard.integer(forKey: "sm_syncedCount") {
+        didSet { UserDefaults.standard.set(syncedCount, forKey: "sm_syncedCount") }
+    }
 
     private let settings: SyncSettings
     private let networkMonitor: NetworkMonitor
