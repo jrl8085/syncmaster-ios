@@ -77,6 +77,17 @@ final class SyncEngine: ObservableObject {
         syncTask = Task { await performSync() }
     }
 
+    /// Runs sync to completion and awaits the result.
+    /// Used by background task handlers that need to know when sync is truly done.
+    func startSyncAndWait() async {
+        guard !status.isActive else {
+            await syncTask?.value; return
+        }
+        guard networkMonitor.isConnected else { status = .failed(error: "No network"); return }
+        guard settings.serverURL != nil else { status = .failed(error: "No server configured"); return }
+        await performSync()
+    }
+
     func pauseSync() {
         syncTask?.cancel(); syncTask = nil
         if status.isActive { status = .paused }

@@ -9,6 +9,7 @@ struct syncmasterApp: App {
         BackgroundSyncScheduler.shared.registerTasks()
         BackgroundSyncScheduler.shared.scheduleNextSync()
         BackgroundSyncScheduler.shared.scheduleNextRefresh()
+        BackgroundSyncScheduler.shared.requestNotificationPermission()
     }
 
     var body: some Scene {
