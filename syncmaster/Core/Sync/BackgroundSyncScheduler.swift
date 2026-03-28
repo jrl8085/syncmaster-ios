@@ -36,6 +36,16 @@ final class BackgroundSyncScheduler {
         log.info("Scheduled next processing sync in ~1 hour")
     }
 
+    /// Schedules an urgent retry after upload failures — fires in 15 minutes.
+    /// Submitting a new request with the same identifier replaces any pending one.
+    func scheduleAggressiveRetry() {
+        let req = BGProcessingTaskRequest(identifier: processingTaskID)
+        req.requiresNetworkConnectivity = true
+        req.earliestBeginDate = Date(timeIntervalSinceNow: 900) // 15 minutes
+        try? BGTaskScheduler.shared.submit(req)
+        log.warning("Scheduled aggressive retry in 15 min due to upload failures")
+    }
+
     /// Schedule the next lightweight refresh task (~15 minutes from now).
     func scheduleNextRefresh() {
         let req = BGAppRefreshTaskRequest(identifier: refreshTaskID)

@@ -123,18 +123,26 @@ async def insert_session(s: dict):
             s); await db.commit()
 
 async def reconcile_with_filesystem(storage_path, device_folder: str = "") -> int:
-    """Remove manifest entries whose files no longer exist on disk. Returns pruned count."""
+    """Remove manifest entries whose files are missing or have a size mismatch on disk.
+    Size mismatch indicates a corrupted or truncated write; removing the entry forces
+    the iOS client to re-upload the file on the next sync. Returns pruned count."""
     from pathlib import Path
     base = Path(storage_path)
     async with aiosqlite.connect(_DB) as db:
         db.row_factory = aiosqlite.Row
         async with db.execute(
-            "SELECT identifier, stored_path FROM files WHERE device_folder=?",
+            "SELECT identifier, stored_path, size_bytes FROM files WHERE device_folder=?",
             (device_folder,)
         ) as c:
             rows = [dict(r) for r in await c.fetchall()]
-        stale = [(r["identifier"], device_folder)
-                 for r in rows if not (base / r["stored_path"]).exists()]
+        stale = []
+        for r in rows:
+            path = base / r["stored_path"]
+            if not path.exists():
+                stale.append((r["identifier"], device_folder))
+            elif path.stat().st_size != r["size_bytes"]:
+                # File exists but is the wrong size — corrupted or truncated.
+                stale.append((r["identifier"], device_folder))
         if stale:
             await db.executemany(
                 "DELETE FROM files WHERE identifier=? AND device_folder=?", stale)
