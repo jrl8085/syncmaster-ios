@@ -8,20 +8,21 @@ from ..storage import manifest_db
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
 @router.get("/manifest")
-async def get_manifest(since: Optional[str] = None):
-    files = await manifest_db.get_manifest(since=since)
+async def get_manifest(since: Optional[str] = None, device_folder: str = ""):
+    files = await manifest_db.get_manifest(since=since, device_folder=device_folder)
     return {"count": len(files), "generated_at": datetime.utcnow().isoformat() + "Z", "files": files}
 
 @router.delete("/manifest")
-async def reset_manifest():
-    await manifest_db.reset_manifest()
+async def reset_manifest(device_folder: Optional[str] = None):
+    await manifest_db.reset_manifest(device_folder=device_folder)
     return {"status": "ok", "message": "Manifest cleared"}
 
 @router.post("/manifest/reconcile")
-async def reconcile_manifest():
+async def reconcile_manifest(body: dict = {}):
     """Prune manifest entries whose files were deleted from disk."""
     storage_path = get_config()["storage_path"]
-    pruned = await manifest_db.reconcile_with_filesystem(storage_path)
+    device_folder = body.get("device_folder", "")
+    pruned = await manifest_db.reconcile_with_filesystem(storage_path, device_folder)
     total = await manifest_db.get_total_count()
     return {"status": "ok", "pruned": pruned, "remaining": total}
 

@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import UIKit
 
 @MainActor
 final class SyncSettings: ObservableObject {
@@ -33,6 +34,10 @@ final class SyncSettings: ObservableObject {
     @Published var hasCompletedOnboarding: Bool = false {
         didSet { UserDefaults.standard.set(hasCompletedOnboarding, forKey: Keys.hasCompletedOnboarding) }
     }
+    /// Subfolder name on the server for this device's backups.
+    @Published var deviceFolder: String = "" {
+        didSet { UserDefaults.standard.set(deviceFolder, forKey: Keys.deviceFolder) }
+    }
 
     var serverURL: URL? {
         guard !serverHost.isEmpty else { return nil }
@@ -60,6 +65,14 @@ final class SyncSettings: ObservableObject {
         syncOnCharging = d.bool(forKey: Keys.syncOnCharging)
         lastSyncDate = d.object(forKey: Keys.lastSyncDate) as? Date
         hasCompletedOnboarding = d.bool(forKey: Keys.hasCompletedOnboarding)
+        if let saved = d.string(forKey: Keys.deviceFolder), !saved.isEmpty {
+            deviceFolder = saved
+        } else {
+            // Default to the device name, sanitized for use as a directory name.
+            deviceFolder = UIDevice.current.name
+                .components(separatedBy: .init(charactersIn: "/\\:*?\"<>|"))
+                .joined(separator: "_")
+        }
     }
 
     private enum Keys {
@@ -71,5 +84,6 @@ final class SyncSettings: ObservableObject {
         static let syncOnCharging = "syncOnCharging"
         static let lastSyncDate = "lastSyncDate"
         static let hasCompletedOnboarding = "hasCompletedOnboarding"
+        static let deviceFolder = "deviceFolder"
     }
 }

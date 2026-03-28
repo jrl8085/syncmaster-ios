@@ -58,6 +58,22 @@ struct SettingsView: View {
                     }
                 }
 
+                // Backup folder
+                Section {
+                    HStack {
+                        Text("Backup Folder")
+                        Spacer()
+                        TextField("Folder name", text: $settings.deviceFolder)
+                            .multilineTextAlignment(.trailing)
+                            .foregroundStyle(.secondary)
+                            .autocorrectionDisabled()
+                    }
+                } header: {
+                    Text("Server Folder")
+                } footer: {
+                    Text("Files are saved under this folder name on the server. Each device should use a unique name.")
+                }
+
                 // Security
                 Section("Security") {
                     HStack {

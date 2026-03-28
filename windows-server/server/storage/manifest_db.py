@@ -8,16 +8,19 @@ _DB = str(DB_FILE)
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    identifier TEXT UNIQUE NOT NULL,
+    identifier TEXT NOT NULL,
+    device_folder TEXT NOT NULL DEFAULT '',
     filename TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     size_bytes INTEGER NOT NULL,
     media_type TEXT NOT NULL,
     stored_path TEXT NOT NULL,
     uploaded_at TEXT NOT NULL,
-    creation_date TEXT
+    creation_date TEXT,
+    UNIQUE(identifier, device_folder)
 );
 CREATE INDEX IF NOT EXISTS idx_id ON files(identifier);
+CREATE INDEX IF NOT EXISTS idx_dev ON files(device_folder);
 CREATE INDEX IF NOT EXISTS idx_sha ON files(sha256);
 CREATE TABLE IF NOT EXISTS sync_sessions (
     id TEXT PRIMARY KEY,
@@ -32,12 +35,21 @@ CREATE TABLE IF NOT EXISTS sync_sessions (
 async def init_db():
     async with aiosqlite.connect(_DB) as db:
         await db.executescript(SCHEMA)
+        # Migration: add device_folder column if upgrading from older schema.
+        try:
+            await db.execute("ALTER TABLE files ADD COLUMN device_folder TEXT NOT NULL DEFAULT ''")
+            await db.commit()
+        except Exception:
+            pass  # column already exists
         await db.commit()
 
-async def find_by_identifier(identifier: str) -> Optional[dict]:
+async def find_by_identifier(identifier: str, device_folder: str = "") -> Optional[dict]:
     async with aiosqlite.connect(_DB) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT * FROM files WHERE identifier=?", (identifier,)) as c:
+        async with db.execute(
+            "SELECT * FROM files WHERE identifier=? AND device_folder=?",
+            (identifier, device_folder)
+        ) as c:
             r = await c.fetchone()
             return dict(r) if r else None
 
@@ -48,21 +60,29 @@ async def find_by_sha256(sha256: str) -> Optional[dict]:
             r = await c.fetchone()
             return dict(r) if r else None
 
-async def insert_file(identifier, filename, sha256, size_bytes, media_type, stored_path, creation_date=None) -> dict:
+async def insert_file(identifier, filename, sha256, size_bytes, media_type, stored_path,
+                      creation_date=None, device_folder: str = "") -> dict:
     ts = datetime.utcnow().isoformat() + "Z"
     async with aiosqlite.connect(_DB) as db:
         await db.execute(
-            "INSERT OR REPLACE INTO files (identifier,filename,sha256,size_bytes,media_type,stored_path,uploaded_at,creation_date) VALUES (?,?,?,?,?,?,?,?)",
-            (identifier, filename, sha256, size_bytes, media_type, stored_path, ts, creation_date))
+            "INSERT OR REPLACE INTO files "
+            "(identifier,device_folder,filename,sha256,size_bytes,media_type,stored_path,uploaded_at,creation_date) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (identifier, device_folder, filename, sha256, size_bytes, media_type, stored_path, ts, creation_date))
         await db.commit()
     return {"identifier": identifier, "filename": filename, "sha256": sha256,
             "size_bytes": size_bytes, "uploaded_at": ts, "stored_path": stored_path}
 
-async def get_manifest(since: Optional[str] = None) -> list[dict]:
+async def get_manifest(since: Optional[str] = None, device_folder: str = "") -> list[dict]:
     async with aiosqlite.connect(_DB) as db:
         db.row_factory = aiosqlite.Row
-        q = "SELECT identifier,filename,sha256,size_bytes,uploaded_at FROM files" + (" WHERE uploaded_at>?" if since else "") + " ORDER BY uploaded_at"
-        args = (since,) if since else ()
+        conditions = ["device_folder=?"]
+        args: list = [device_folder]
+        if since:
+            conditions.append("uploaded_at>?")
+            args.append(since)
+        where = " WHERE " + " AND ".join(conditions)
+        q = f"SELECT identifier,filename,sha256,size_bytes,uploaded_at FROM files{where} ORDER BY uploaded_at"
         async with db.execute(q, args) as c:
             return [dict(r) for r in await c.fetchall()]
 
@@ -76,9 +96,11 @@ async def get_total_bytes() -> int:
         async with db.execute("SELECT COALESCE(SUM(size_bytes),0) FROM files") as c:
             r = await c.fetchone(); return r[0] if r else 0
 
-async def delete_file(identifier: str) -> bool:
+async def delete_file(identifier: str, device_folder: str = "") -> bool:
     async with aiosqlite.connect(_DB) as db:
-        c = await db.execute("DELETE FROM files WHERE identifier=?", (identifier,))
+        c = await db.execute(
+            "DELETE FROM files WHERE identifier=? AND device_folder=?",
+            (identifier, device_folder))
         await db.commit(); return c.rowcount > 0
 
 async def insert_session(s: dict):
@@ -87,23 +109,31 @@ async def insert_session(s: dict):
             "INSERT OR REPLACE INTO sync_sessions (id,started_at,completed_at,files_uploaded,bytes_transferred,skipped_duplicates,errors) VALUES (:session_id,:started_at,:completed_at,:files_uploaded,:bytes_transferred,:skipped_duplicates,:errors)",
             s); await db.commit()
 
-async def reconcile_with_filesystem(storage_path) -> int:
+async def reconcile_with_filesystem(storage_path, device_folder: str = "") -> int:
     """Remove manifest entries whose files no longer exist on disk. Returns pruned count."""
     from pathlib import Path
     base = Path(storage_path)
     async with aiosqlite.connect(_DB) as db:
         db.row_factory = aiosqlite.Row
-        async with db.execute("SELECT identifier, stored_path FROM files") as c:
+        async with db.execute(
+            "SELECT identifier, stored_path FROM files WHERE device_folder=?",
+            (device_folder,)
+        ) as c:
             rows = [dict(r) for r in await c.fetchall()]
-        stale = [r["identifier"] for r in rows if not (base / r["stored_path"]).exists()]
+        stale = [(r["identifier"], device_folder)
+                 for r in rows if not (base / r["stored_path"]).exists()]
         if stale:
-            await db.executemany("DELETE FROM files WHERE identifier=?", [(i,) for i in stale])
+            await db.executemany(
+                "DELETE FROM files WHERE identifier=? AND device_folder=?", stale)
             await db.commit()
     return len(stale)
 
-async def reset_manifest():
+async def reset_manifest(device_folder: Optional[str] = None):
     async with aiosqlite.connect(_DB) as db:
-        await db.execute("DELETE FROM files")
+        if device_folder is not None:
+            await db.execute("DELETE FROM files WHERE device_folder=?", (device_folder,))
+        else:
+            await db.execute("DELETE FROM files")
         await db.commit()
 
 async def get_recent_sessions(limit=20) -> list[dict]:

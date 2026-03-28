@@ -15,8 +15,9 @@ def get_free_bytes() -> int:
     return shutil.disk_usage(get_storage_root()).free
 
 async def store_file(file_data: bytes, identifier: str, filename: str, media_type: str,
-                     creation_date: Optional[str], sha256_client: str, size_bytes: int) -> tuple[dict, bool]:
-    if existing := await manifest_db.find_by_identifier(identifier):
+                     creation_date: Optional[str], sha256_client: str, size_bytes: int,
+                     device_folder: str = "") -> tuple[dict, bool]:
+    if existing := await manifest_db.find_by_identifier(identifier, device_folder):
         return existing, True
 
     sha256 = hashlib.sha256(file_data).hexdigest()
@@ -24,24 +25,29 @@ async def store_file(file_data: bytes, identifier: str, filename: str, media_typ
         raise ValueError(f"SHA256 mismatch: client={sha256_client}, server={sha256}")
 
     if existing_hash := await manifest_db.find_by_sha256(sha256):
-        record = await manifest_db.insert_file(identifier, filename, sha256, size_bytes,
-                                                media_type, existing_hash["stored_path"], creation_date)
+        record = await manifest_db.insert_file(
+            identifier, filename, sha256, size_bytes, media_type,
+            existing_hash["stored_path"], creation_date, device_folder)
         return record, True
 
-    dest_dir = _make_dest_dir(creation_date)
+    dest_dir = _make_dest_dir(creation_date, device_folder)
     dest = _unique_path(dest_dir, filename)
     dest.write_bytes(file_data)
     stored_path = str(dest.relative_to(get_storage_root()))
-    record = await manifest_db.insert_file(identifier, filename, sha256, size_bytes,
-                                            media_type, stored_path, creation_date)
+    record = await manifest_db.insert_file(
+        identifier, filename, sha256, size_bytes, media_type,
+        stored_path, creation_date, device_folder)
     return record, False
 
-def _make_dest_dir(creation_date: Optional[str]) -> Path:
+def _make_dest_dir(creation_date: Optional[str], device_folder: str = "") -> Path:
     try:
         dt = datetime.fromisoformat(creation_date.rstrip("Z")) if creation_date else datetime.utcnow()
     except ValueError:
         dt = datetime.utcnow()
-    d = get_storage_root() / f"{dt.year:04d}"
+    d = get_storage_root()
+    if device_folder:
+        d = d / device_folder
+    d = d / f"{dt.year:04d}"
     d.mkdir(parents=True, exist_ok=True)
     return d
 

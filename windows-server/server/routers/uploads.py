@@ -24,6 +24,7 @@ async def upload_file(
     creation_date: str = Form(default=""),
     sha256: str = Form(...),
     size_bytes: int = Form(...),
+    device_folder: str = Form(default=""),
 ):
     if file_store.get_free_bytes() < 100 * 1024 * 1024:
         raise HTTPException(507, "Insufficient storage space")
@@ -31,7 +32,8 @@ async def upload_file(
     data = await file.read()
     try:
         record, is_dup = await file_store.store_file(
-            data, identifier, filename, media_type, creation_date or None, sha256, size_bytes)
+            data, identifier, filename, media_type, creation_date or None,
+            sha256, size_bytes, device_folder)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

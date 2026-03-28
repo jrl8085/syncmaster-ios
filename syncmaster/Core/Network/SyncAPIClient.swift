@@ -95,9 +95,11 @@ actor SyncAPIClient {
     }
 
     func fetchManifest(since: Date? = nil) async throws -> ManifestResponse {
-        var path = "manifest"
+        let folder = await settings.deviceFolder.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed) ?? ""
+        var path = "manifest?device_folder=\(folder)"
         if let since {
-            path += "?since=\(ISO8601DateFormatter().string(from: since))"
+            path += "&since=\(ISO8601DateFormatter().string(from: since))"
         }
         return try decode(ManifestResponse.self, from: try await get(path))
     }
@@ -140,6 +142,7 @@ actor SyncAPIClient {
         try writeField("creation_date", isoDate)
         try writeField("sha256", sha256)
         try writeField("size_bytes", String(sizeBytes))
+        try writeField("device_folder", await settings.deviceFolder)
         try writeString("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n")
 
         // Copy file payload in 1 MB chunks.
@@ -162,15 +165,19 @@ actor SyncAPIClient {
     /// Tells the server to prune manifest entries whose files no longer exist on disk.
     /// Call at the start of sync so deleted-on-server assets are re-uploaded.
     func reconcileServerManifest() async throws -> Int {
-        let data = try await post("manifest/reconcile", json: [:])
+        let folder = await settings.deviceFolder
+        let data = try await post("manifest/reconcile", json: ["device_folder": folder])
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let pruned = json["pruned"] as? Int { return pruned }
         return 0
     }
 
     func resetServerManifest() async throws {
+        let folder = await settings.deviceFolder.addingPercentEncoding(
+            withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let serverURL = await settings.serverURL else { throw APIError.noServerConfigured }
-        var req = URLRequest(url: serverURL.appendingPathComponent("manifest"))
+        var req = URLRequest(url: serverURL.appendingPathComponent("manifest")
+            .appending(queryItems: [URLQueryItem(name: "device_folder", value: folder)]))
         req.httpMethod = "DELETE"
         req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
         let (data, response) = try await session().data(for: req)
