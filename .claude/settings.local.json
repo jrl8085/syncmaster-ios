@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(venv/Scripts/pyinstaller.exe syncmaster.spec)"
+      "Bash(venv/Scripts/pyinstaller.exe syncmaster.spec)",
+      "Bash(venv/Scripts/python.exe main.py)"
     ]
   }
 }
