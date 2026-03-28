@@ -7,19 +7,21 @@ private let log = Logger(subsystem: "com.syncmaster", category: "SyncEngine")
 
 enum SyncStatus: Equatable {
     case idle
-    case scanning
+    case indexing                                          // server scanning its filesystem
+    case scanning                                          // iOS diffing local library
     case uploading(current: Int, total: Int, filename: String)
     case paused
     case completed(uploaded: Int, skipped: Int, failed: Int)
     case failed(error: String)
 
     var isActive: Bool {
-        switch self { case .scanning, .uploading: return true; default: return false }
+        switch self { case .indexing, .scanning, .uploading: return true; default: return false }
     }
 
     var displayText: String {
         switch self {
         case .idle: return "Ready to sync"
+        case .indexing: return "Server indexing…"
         case .scanning: return "Scanning library…"
         case .uploading(let cur, let tot, _): return "Uploading \(cur) of \(tot)"
         case .paused: return "Paused"
@@ -66,8 +68,14 @@ final class SyncEngine: ObservableObject {
     func refreshSyncedCountFromServer() async {
         guard let manifest = try? await apiClient.fetchManifest() else { return }
         await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
-        syncedCount = manifest.files.filter { !$0.identifier.hasSuffix("-video") }.count
-        serverFileCount = manifest.files.count
+        syncedCount = manifest.files.filter { isConfirmedAsset($0) }.count
+        serverFileCount = Set(manifest.files.map { $0.sha256 }).count
+    }
+
+    /// True for manifest entries that represent a confirmed iOS asset —
+    /// excludes live-photo video components and server-indexed placeholders.
+    private func isConfirmedAsset(_ file: ManifestFile) -> Bool {
+        !file.identifier.hasSuffix("-video") && !file.identifier.hasPrefix("__indexed__")
     }
 
     func startSync() async {
@@ -75,6 +83,17 @@ final class SyncEngine: ObservableObject {
         guard networkMonitor.isConnected else { status = .failed(error: "No network"); return }
         guard settings.serverURL != nil else { status = .failed(error: "No server configured"); return }
         syncTask = Task { await performSync() }
+    }
+
+    /// Runs sync to completion and awaits the result.
+    /// Used by background task handlers that need to know when sync is truly done.
+    func startSyncAndWait() async {
+        guard !status.isActive else {
+            await syncTask?.value; return
+        }
+        guard networkMonitor.isConnected else { status = .failed(error: "No network"); return }
+        guard settings.serverURL != nil else { status = .failed(error: "No server configured"); return }
+        await performSync()
     }
 
     func pauseSync() {
@@ -89,11 +108,12 @@ final class SyncEngine: ObservableObject {
 
     func resetSyncRecords() async {
         stopSync()
-        try? await apiClient.resetServerManifest()
+        // Clear the local tracker only — the server manifest is preserved as the source
+        // of truth so the file count stays accurate and we don't force unnecessary re-uploads.
         await tracker.reset()
-        syncedCount = 0
-        serverFileCount = 0
         failedIdentifiers = []
+        // Refresh counts from the server so the display reflects reality immediately.
+        await refreshSyncedCountFromServer()
     }
 
     // MARK: - Pipeline
@@ -106,6 +126,14 @@ final class SyncEngine: ObservableObject {
         status = .scanning
 
         do {
+            // Index the server's filesystem first so any files already on disk (but not yet
+            // in the manifest) are discovered before we decide what needs uploading.
+            // This ensures "Backed Up" is accurate even after a sync reset.
+            status = .indexing
+            if let result = try? await apiClient.indexServerFiles() {
+                log.info("Server index: \(result.indexed) new file(s) found, \(result.alreadyKnown) already known")
+            }
+
             // Ask server to prune entries for files deleted from disk, then fetch fresh manifest.
             if let pruned = try? await apiClient.reconcileServerManifest(), pruned > 0 {
                 log.info("Server reconcile: pruned \(pruned) stale manifest entry(s)")
@@ -116,8 +144,8 @@ final class SyncEngine: ObservableObject {
             if let manifest = try? await apiClient.fetchManifest() {
                 log.info("Server manifest: \(manifest.count) file(s) already on server")
                 await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
-                syncedCount = manifest.files.filter { !$0.identifier.hasSuffix("-video") }.count
-                serverFileCount = manifest.files.count
+                syncedCount = manifest.files.filter { isConfirmedAsset($0) }.count
+                serverFileCount = Set(manifest.files.map { $0.sha256 }).count
             } else {
                 log.warning("Could not fetch server manifest — using local tracker")
                 syncedCount = await tracker.syncedAssetCount()

@@ -35,6 +35,8 @@
 	<string>SyncMaster needs local network access to connect to your media server.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>SyncMaster needs access to your photo library to back up your media to your home server.</string>
+	<key>NSUserNotificationUsageDescription</key>
+	<string>SyncMaster sends a notification when a background backup completes.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>background-fetch</string>
