@@ -93,6 +93,14 @@ async def get_manifest(since: Optional[str] = None, device_folder: str = "") -> 
         async with db.execute(q, args) as c:
             return [dict(r) for r in await c.fetchall()]
 
+async def get_stored_paths(device_folder: str = "") -> set[str]:
+    """Return the set of stored_path values already in the manifest for a device folder."""
+    async with aiosqlite.connect(_DB) as db:
+        async with db.execute(
+            "SELECT stored_path FROM files WHERE device_folder=?", (device_folder,)
+        ) as c:
+            return {r[0] for r in await c.fetchall()}
+
 async def get_all_device_folders() -> list[str]:
     """Return distinct device_folder values currently in the manifest."""
     async with aiosqlite.connect(_DB) as db:

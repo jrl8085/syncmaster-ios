@@ -162,6 +162,17 @@ actor SyncAPIClient {
         return try decode(UploadResponse.self, from: data)
     }
 
+    /// Asks the server to scan its storage folder and index any untracked files.
+    /// Returns (indexed, alreadyKnown) counts.
+    func indexServerFiles() async throws -> (indexed: Int, alreadyKnown: Int) {
+        let folder = await settings.deviceFolder
+        let data = try await post("manifest/index", json: ["device_folder": folder])
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return (0, 0)
+        }
+        return (json["indexed"] as? Int ?? 0, json["already_known"] as? Int ?? 0)
+    }
+
     /// Attempts to register an identifier against an already-stored file (by sha256).
     /// Returns true if the server confirmed it has the file and created a manifest entry.
     /// No file bytes are transferred.

@@ -98,7 +98,7 @@ struct SettingsView: View {
                     Task { await env.syncEngine.resetSyncRecords() }
                 }
             } message: {
-                Text("Clears all backup records. Your files on the server are not deleted.")
+                Text("Resets the local sync state and re-checks the server. Only files missing from the server will be re-uploaded.")
             }
         }
     }
