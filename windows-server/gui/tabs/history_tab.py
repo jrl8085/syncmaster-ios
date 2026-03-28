@@ -130,6 +130,44 @@ class HistoryTab(QWidget):
             self._rows_layout.removeWidget(old)
             old.deleteLater()
 
+    def on_reconcile(self, event: dict):
+        """Insert a system-event row when the hourly reconcile fires."""
+        if self._empty_lbl.isVisible():
+            self._empty_lbl.hide()
+
+        pruned = event.get("pruned", 0)
+        folders = event.get("folders", 0)
+        ts = datetime.now().strftime("%H:%M:%S")
+        msg = (f"Pruned {pruned} stale entry(s) across {folders} folder(s)"
+               if pruned else
+               f"Reconcile OK — {folders} folder(s) verified")
+        row = self._make_system_row(ts, msg, C_WARNING if pruned else C_SUCCESS,
+                                    len(self._row_widgets))
+        self._rows_layout.insertWidget(0, row)
+        self._row_widgets.insert(0, row)
+        while len(self._row_widgets) > MAX_ROWS:
+            old = self._row_widgets.pop()
+            self._rows_layout.removeWidget(old)
+            old.deleteLater()
+
+    def _make_system_row(self, ts: str, message: str, color: str, idx: int) -> QFrame:
+        f = QFrame()
+        f.setFixedHeight(34)
+        f.setStyleSheet(
+            f"background-color: {C_ROW_A if idx % 2 == 0 else C_ROW_B}; "
+            f"border-radius: 6px; border-left: 3px solid {color};")
+        row_layout = QHBoxLayout(f)
+        row_layout.setContentsMargins(12, 0, 12, 0)
+        row_layout.setSpacing(10)
+        ts_lbl = QLabel(ts)
+        ts_lbl.setFixedWidth(80)
+        ts_lbl.setStyleSheet(f"color: {C_MUTED}; font-size: 12px;")
+        msg_lbl = QLabel(message)
+        msg_lbl.setStyleSheet(f"color: {color}; font-size: 12px;")
+        row_layout.addWidget(ts_lbl)
+        row_layout.addWidget(msg_lbl, stretch=1)
+        return f
+
     def _make_row(self, row: dict, idx: int) -> QFrame:
         is_dup = row.get("duplicate", False)
         media_type = row.get("media_type", "photo")

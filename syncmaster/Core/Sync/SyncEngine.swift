@@ -37,6 +37,11 @@ final class SyncEngine: ObservableObject {
     @Published private(set) var syncedCount: Int = UserDefaults.standard.integer(forKey: "sm_syncedCount") {
         didSet { UserDefaults.standard.set(syncedCount, forKey: "sm_syncedCount") }
     }
+    @Published private(set) var serverFileCount: Int = UserDefaults.standard.integer(forKey: "sm_serverFileCount") {
+        didSet { UserDefaults.standard.set(serverFileCount, forKey: "sm_serverFileCount") }
+    }
+    /// Identifiers of assets that failed to upload during the most recent sync session.
+    @Published private(set) var failedIdentifiers: Set<String> = []
 
     private let settings: SyncSettings
     private let networkMonitor: NetworkMonitor
@@ -62,6 +67,7 @@ final class SyncEngine: ObservableObject {
         guard let manifest = try? await apiClient.fetchManifest() else { return }
         await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
         syncedCount = manifest.files.filter { !$0.identifier.hasSuffix("-video") }.count
+        serverFileCount = manifest.files.count
     }
 
     func startSync() async {
@@ -92,6 +98,7 @@ final class SyncEngine: ObservableObject {
 
     private func performSync() async {
         log.info("▶ Sync started")
+        failedIdentifiers = []
         var session = SyncSession(startedAt: Date())
         currentSession = session
         status = .scanning
@@ -108,6 +115,7 @@ final class SyncEngine: ObservableObject {
                 log.info("Server manifest: \(manifest.count) file(s) already on server")
                 await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
                 syncedCount = manifest.files.filter { !$0.identifier.hasSuffix("-video") }.count
+                serverFileCount = manifest.files.count
             } else {
                 log.warning("Could not fetch server manifest — using local tracker")
                 syncedCount = await tracker.syncedAssetCount()
@@ -206,6 +214,7 @@ final class SyncEngine: ObservableObject {
                     }
                 } catch {
                     failed += 1
+                    failedIdentifiers.insert(asset.localIdentifier)
                     log.error("  ✗ Failed \(name): \(error.localizedDescription)")
                 }
 

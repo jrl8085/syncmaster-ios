@@ -7,6 +7,8 @@ struct syncmasterApp: App {
 
     init() {
         BackgroundSyncScheduler.shared.registerTasks()
+        BackgroundSyncScheduler.shared.scheduleNextSync()
+        BackgroundSyncScheduler.shared.scheduleNextRefresh()
     }
 
     var body: some Scene {

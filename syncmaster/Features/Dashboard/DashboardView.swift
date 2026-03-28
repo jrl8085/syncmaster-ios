@@ -142,6 +142,13 @@ struct StatisticsCard: View {
                     Divider()
                     StatTile(value: "\(pendingCount)", label: "Pending", icon: "clock.arrow.circlepath", color: .orange)
                 }
+                Divider()
+                HStack(spacing: 6) {
+                    Image(systemName: "server.rack").font(.caption).foregroundStyle(.secondary)
+                    Text("Server folder:").font(.caption).foregroundStyle(.secondary)
+                    Text("\(syncEngine.serverFileCount) files").font(.caption.weight(.semibold))
+                    Spacer()
+                }
             }
         }
     }
@@ -227,7 +234,9 @@ struct LastSyncCard: View {
 struct DashCard<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
-        content.padding()
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
     }
 }

@@ -9,15 +9,16 @@ struct LibraryView: View {
     private let columns = [GridItem(.adaptive(minimum: 100, maximum: 130), spacing: 2)]
 
     enum FilterOption: String, CaseIterable {
-        case all = "All", pending = "Pending", uploaded = "Backed Up", videos = "Videos"
+        case all = "All", pending = "Pending", uploaded = "Backed Up", videos = "Videos", failed = "Failed"
     }
 
     var filtered: [MediaItem] {
         switch filter {
         case .all: return mediaLibrary.allAssets
-        case .pending: return mediaLibrary.allAssets.filter { $0.isPending }
+        case .pending: return mediaLibrary.allAssets.filter { !syncEngine.failedIdentifiers.contains($0.id) && $0.isPending }
         case .uploaded: return mediaLibrary.allAssets.filter { $0.isUploaded }
         case .videos: return mediaLibrary.allAssets.filter { $0.asset.mediaType == .video }
+        case .failed: return mediaLibrary.allAssets.filter { syncEngine.failedIdentifiers.contains($0.id) }
         }
     }
 
@@ -65,11 +66,25 @@ struct LibraryView: View {
                         Button {
                             withAnimation(.easeInOut(duration: 0.2)) { filter = opt }
                         } label: {
-                            Text(opt.rawValue)
-                                .font(.subheadline.weight(filter == opt ? .semibold : .regular))
-                                .padding(.horizontal, 14).padding(.vertical, 6)
-                                .background(filter == opt ? Color.accentColor : Color(.secondarySystemFill), in: Capsule())
-                                .foregroundStyle(filter == opt ? .white : .primary)
+                            HStack(spacing: 4) {
+                                Text(opt.rawValue)
+                                    .font(.subheadline.weight(filter == opt ? .semibold : .regular))
+                                if opt == .failed, !syncEngine.failedIdentifiers.isEmpty {
+                                    Text("\(syncEngine.failedIdentifiers.count)")
+                                        .font(.caption2.weight(.bold))
+                                        .padding(.horizontal, 5).padding(.vertical, 2)
+                                        .background(.red, in: Capsule())
+                                        .foregroundStyle(.white)
+                                }
+                            }
+                            .padding(.horizontal, 14).padding(.vertical, 6)
+                            .background(
+                                opt == .failed && filter != opt
+                                    ? (!syncEngine.failedIdentifiers.isEmpty ? Color.red.opacity(0.12) : Color(.secondarySystemFill))
+                                    : (filter == opt ? Color.accentColor : Color(.secondarySystemFill)),
+                                in: Capsule()
+                            )
+                            .foregroundStyle(filter == opt ? .white : .primary)
                         }.buttonStyle(.plain)
                     }
                 }.padding(.horizontal).padding(.vertical, 8)

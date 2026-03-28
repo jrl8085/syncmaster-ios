@@ -453,6 +453,7 @@ class SyncMasterWindow(QMainWindow):
         """Drain the queue each tick. Batch all upload events so widget
         creation stays O(1) per tick regardless of upload burst size."""
         upload_events: list[dict] = []
+        reconcile_event: dict | None = None
         try:
             while True:
                 event = self.event_queue.get_nowait()
@@ -465,8 +466,13 @@ class SyncMasterWindow(QMainWindow):
                         "Server running" if running else "Server stopped")
                     self._dot.setStyleSheet(
                         f"color: {C_SUCCESS if running else C_DANGER}; font-size: 9px;")
+                elif t == "reconcile":
+                    reconcile_event = event
         except Exception:
             pass
+
+        if reconcile_event is not None:
+            self._tabs["history"].on_reconcile(reconcile_event)
 
         if not upload_events:
             return

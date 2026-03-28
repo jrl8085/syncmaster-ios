@@ -93,6 +93,12 @@ async def get_manifest(since: Optional[str] = None, device_folder: str = "") -> 
         async with db.execute(q, args) as c:
             return [dict(r) for r in await c.fetchall()]
 
+async def get_all_device_folders() -> list[str]:
+    """Return distinct device_folder values currently in the manifest."""
+    async with aiosqlite.connect(_DB) as db:
+        async with db.execute("SELECT DISTINCT device_folder FROM files") as c:
+            return [r[0] for r in await c.fetchall()]
+
 async def get_total_count() -> int:
     async with aiosqlite.connect(_DB) as db:
         async with db.execute("SELECT COUNT(*) FROM files") as c:
