@@ -162,6 +162,33 @@ actor SyncAPIClient {
         return try decode(UploadResponse.self, from: data)
     }
 
+    /// Attempts to register an identifier against an already-stored file (by sha256).
+    /// Returns true if the server confirmed it has the file and created a manifest entry.
+    /// No file bytes are transferred.
+    func registerFile(
+        identifier: String,
+        sha256: String,
+        filename: String,
+        mediaType: MediaType,
+        creationDate: Date?,
+        sizeBytes: Int64
+    ) async -> Bool {
+        let isoDate = creationDate.map { ISO8601DateFormatter().string(from: $0) } ?? ""
+        let body: [String: Any] = [
+            "identifier": identifier,
+            "sha256": sha256,
+            "filename": filename,
+            "media_type": mediaType.rawValue,
+            "creation_date": isoDate,
+            "size_bytes": sizeBytes,
+            "device_folder": await settings.deviceFolder
+        ]
+        guard let data = try? await post("manifest/register", json: body),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let registered = json["registered"] as? Bool else { return false }
+        return registered
+    }
+
     /// Tells the server to prune manifest entries whose files no longer exist on disk.
     /// Call at the start of sync so deleted-on-server assets are re-uploaded.
     func reconcileServerManifest() async throws -> Int {

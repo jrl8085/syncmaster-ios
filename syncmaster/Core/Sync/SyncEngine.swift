@@ -123,6 +123,15 @@ final class SyncEngine: ObservableObject {
                 syncedCount = await tracker.syncedAssetCount()
             }
             let baseSyncedCount = syncedCount
+            // Build a sha256 index of everything already on the server.
+            // Used to skip file transfers for content that's already stored
+            // (e.g. same photo under a different identifier after reinstall).
+            let serverSHA256s: Set<String>
+            if let manifest = try? await apiClient.fetchManifest() {
+                serverSHA256s = Set(manifest.files.map { $0.sha256 })
+            } else {
+                serverSHA256s = []
+            }
             var syncedInSession = 0
 
             // Fetch and enumerate off the main thread to avoid PHAssetOriginalMetadataProperties warnings.
@@ -188,6 +197,24 @@ final class SyncEngine: ObservableObject {
                             if Task.isCancelled { break }
                             let isLiveVideo = file.mediaType == .livePhotoVideo
                             let uploadID = asset.localIdentifier + (isLiveVideo ? "-video" : "")
+
+                            // If the server already has this exact content (sha256 match),
+                            // register the identifier without transferring any file bytes.
+                            if serverSHA256s.contains(file.sha256) {
+                                log.info("  ↩ Content already on server — registering \(file.filename) (no transfer)")
+                                let registered = await apiClient.registerFile(
+                                    identifier: uploadID, sha256: file.sha256,
+                                    filename: file.filename, mediaType: file.mediaType,
+                                    creationDate: asset.creationDate, sizeBytes: file.sizeBytes)
+                                if registered {
+                                    results.append(UploadResult(file: file, uploadID: uploadID,
+                                                                deduplicated: true))
+                                    continue
+                                }
+                                // Register failed (server may no longer have it) — fall through to full upload.
+                                log.warning("  Register failed for \(file.filename) — falling back to upload")
+                            }
+
                             log.info("  Uploading \(file.filename) (\(file.sizeBytes) bytes)")
                             let response = try await apiClient.uploadFile(
                                 fileURL: file.url, identifier: uploadID,

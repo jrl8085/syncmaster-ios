@@ -1,9 +1,9 @@
 from datetime import datetime
 from typing import Optional
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from ..auth import verify_api_key
 from ..config import get_config
-from ..storage import manifest_db
+from ..storage import manifest_db, file_store
 
 router = APIRouter(dependencies=[Depends(verify_api_key)])
 
@@ -25,6 +25,39 @@ async def reconcile_manifest(body: dict = {}):
     pruned = await manifest_db.reconcile_with_filesystem(storage_path, device_folder)
     total = await manifest_db.get_total_count()
     return {"status": "ok", "pruned": pruned, "remaining": total}
+
+@router.post("/manifest/register")
+async def register_identifier(body: dict):
+    """Register an identifier that matches an already-stored file by sha256.
+    Called by iOS when the exported file's hash is already in the server manifest,
+    avoiding a full file upload. Creates a manifest entry reusing the existing path."""
+    identifier = body.get("identifier", "")
+    sha256 = body.get("sha256", "")
+    device_folder = body.get("device_folder", "")
+    if not identifier or not sha256:
+        raise HTTPException(400, "identifier and sha256 are required")
+
+    existing = await manifest_db.find_by_sha256(sha256)
+    if not existing:
+        return {"status": "not_found", "registered": False}
+
+    root = file_store.get_storage_root()
+    if not (root / existing["stored_path"]).exists():
+        return {"status": "not_found", "registered": False}
+
+    record = await manifest_db.insert_file(
+        identifier,
+        body.get("filename", existing["filename"]),
+        sha256,
+        body.get("size_bytes", existing["size_bytes"]),
+        body.get("media_type", existing["media_type"]),
+        existing["stored_path"],
+        body.get("creation_date"),
+        device_folder,
+    )
+    return {"status": "ok", "registered": True, "stored_path": record["stored_path"],
+            "identifier": identifier}
+
 
 @router.post("/sync/complete")
 async def sync_complete(body: dict):
