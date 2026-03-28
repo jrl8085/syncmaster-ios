@@ -6,7 +6,8 @@ import queue
 import sys
 import threading
 import uvicorn
-from PyQt6.QtWidgets import QApplication
+import ctypes
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from server.config import get_config
 from server.ssl_utils import generate_self_signed_cert, cert_covers_current_ip, get_local_ip
@@ -25,7 +26,19 @@ EXTRA_THEME = {
 }
 
 
+_MUTEX = None  # keep alive for process lifetime
+
+def _ensure_single_instance():
+    global _MUTEX
+    _MUTEX = ctypes.windll.kernel32.CreateMutexW(None, True, "Global\\SyncMasterApp")
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        app = QApplication.instance() or QApplication(sys.argv)
+        QMessageBox.information(None, "SyncMaster", "SyncMaster is already running.")
+        sys.exit(0)
+
+
 def main():
+    _ensure_single_instance()
     cert_file, key_file = generate_self_signed_cert(force=not cert_covers_current_ip())
     event_queue: queue.Queue = queue.Queue(maxsize=500)
     cfg = get_config()

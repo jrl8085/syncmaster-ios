@@ -296,6 +296,11 @@ class SyncMasterWindow(QMainWindow):
         self._timer.timeout.connect(self._poll_events)
         self._timer.start(250)
 
+        # Refresh IP display every 5 s in case network changes
+        self._ip_timer = QTimer(self)
+        self._ip_timer.timeout.connect(self._refresh_ip)
+        self._ip_timer.start(5000)
+
     # ── Layout ────────────────────────────────────────────────────────────────
 
     def _build_ui(self):
@@ -426,11 +431,11 @@ class SyncMasterWindow(QMainWindow):
 
         addr_lbl = QLabel("Server Address")
         addr_lbl.setObjectName("footerLabel")
-        addr_val = QLabel(f"{ip}:{cfg['port']}")
-        addr_val.setObjectName("serverAddr")
+        self._addr_val = QLabel(f"{ip}:{cfg['port']}")
+        self._addr_val.setObjectName("serverAddr")
 
         foot_layout.addWidget(addr_lbl)
-        foot_layout.addWidget(addr_val)
+        foot_layout.addWidget(self._addr_val)
         layout.addWidget(footer)
 
         return sb
@@ -519,6 +524,11 @@ class SyncMasterWindow(QMainWindow):
         self.showNormal()
         self.raise_()
         self.activateWindow()
+
+    def _refresh_ip(self):
+        cfg = get_config()
+        ip = get_local_ip()
+        self._addr_val.setText(f"{ip}:{cfg['port']}")
 
     def _on_settings_save(self, storage_path: str, port: int):
         update_config(storage_path=storage_path, port=port)

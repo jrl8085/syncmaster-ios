@@ -34,13 +34,20 @@ CREATE TABLE IF NOT EXISTS sync_sessions (
 
 async def init_db():
     async with aiosqlite.connect(_DB) as db:
-        await db.executescript(SCHEMA)
-        # Migration: add device_folder column if upgrading from older schema.
+        # Migration: add device_folder column before running schema (which creates index on it).
+        await db.execute(
+            "CREATE TABLE IF NOT EXISTS files ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, identifier TEXT NOT NULL, filename TEXT NOT NULL, "
+            "sha256 TEXT NOT NULL, size_bytes INTEGER NOT NULL, media_type TEXT NOT NULL, "
+            "stored_path TEXT NOT NULL, uploaded_at TEXT NOT NULL, creation_date TEXT)"
+        )
+        await db.commit()
         try:
             await db.execute("ALTER TABLE files ADD COLUMN device_folder TEXT NOT NULL DEFAULT ''")
             await db.commit()
         except Exception:
             pass  # column already exists
+        await db.executescript(SCHEMA)
         await db.commit()
 
 async def find_by_identifier(identifier: str, device_folder: str = "") -> Optional[dict]:
