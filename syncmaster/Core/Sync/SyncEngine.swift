@@ -92,6 +92,8 @@ final class SyncEngine: ObservableObject {
         try? await apiClient.resetServerManifest()
         await tracker.reset()
         syncedCount = 0
+        serverFileCount = 0
+        failedIdentifiers = []
     }
 
     // MARK: - Pipeline
@@ -166,56 +168,72 @@ final class SyncEngine: ObservableObject {
                 status = .uploading(current: idx + 1, total: toUpload.count, filename: name)
                 overallProgress = Double(idx) / Double(max(toUpload.count, 1))
 
-                do {
-                    let files = try await exporter.export(asset: asset, mediaType: mediaType)
-                    log.info("  Exported \(files.count) file(s) for \(name)")
-                    defer { files.forEach { exporter.cleanupTempFile(at: $0.url) } }
+                // Retry each asset up to 3 times before counting it as failed.
+                // Backoff: 5 s after attempt 1, 15 s after attempt 2.
+                struct UploadResult {
+                    let file: ExportedFile; let uploadID: String; let deduplicated: Bool
+                }
+                var lastError: Error? = nil
+                for attempt in 1...3 {
+                    if Task.isCancelled { break }
+                    do {
+                        let files = try await exporter.export(asset: asset, mediaType: mediaType)
+                        log.info("  Exported \(files.count) file(s) for \(name) (attempt \(attempt))")
+                        defer { files.forEach { exporter.cleanupTempFile(at: $0.url) } }
 
-                    // Upload all files for this asset; accumulate results before marking the tracker
-                    // so a partial failure (e.g. live-photo video) doesn't permanently hide the asset.
-                    struct UploadResult {
-                        let file: ExportedFile; let uploadID: String; let deduplicated: Bool
-                    }
-                    var results: [UploadResult] = []
-                    for file in files {
-                        if Task.isCancelled { break }
-                        let isLiveVideo = file.mediaType == .livePhotoVideo
-                        let uploadID = asset.localIdentifier + (isLiveVideo ? "-video" : "")
-                        log.info("  Uploading \(file.filename) (\(file.sizeBytes) bytes)")
-                        let response = try await apiClient.uploadFile(
-                            fileURL: file.url, identifier: uploadID,
-                            filename: file.filename, mediaType: file.mediaType,
-                            creationDate: asset.creationDate,
-                            sha256: file.sha256, sizeBytes: file.sizeBytes)
-                        results.append(UploadResult(file: file, uploadID: uploadID,
-                                                    deduplicated: response.deduplicated))
-                    }
-
-                    // Only mark tracker after ALL files for this asset succeed.
-                    if !Task.isCancelled {
-                        for r in results {
-                            if r.deduplicated {
-                                skipped += 1
-                                log.info("  ↩ Deduplicated: \(r.file.filename)")
-                            } else {
-                                uploaded += 1
-                                bytesTotal += r.file.sizeBytes
-                                log.info("  ✓ Uploaded: \(r.file.filename)")
-                            }
-                            await tracker.markUploaded(
-                                identifier: r.uploadID, filename: r.file.filename,
-                                sha256: r.file.sha256, sizeBytes: r.file.sizeBytes,
-                                mediaType: r.file.mediaType,
-                                serverURL: settings.serverURL?.absoluteString ?? "",
-                                modificationDate: asset.modificationDate)
+                        // Upload all files for this asset; accumulate results before marking the
+                        // tracker so a partial failure doesn't permanently hide the asset.
+                        var results: [UploadResult] = []
+                        for file in files {
+                            if Task.isCancelled { break }
+                            let isLiveVideo = file.mediaType == .livePhotoVideo
+                            let uploadID = asset.localIdentifier + (isLiveVideo ? "-video" : "")
+                            log.info("  Uploading \(file.filename) (\(file.sizeBytes) bytes)")
+                            let response = try await apiClient.uploadFile(
+                                fileURL: file.url, identifier: uploadID,
+                                filename: file.filename, mediaType: file.mediaType,
+                                creationDate: asset.creationDate,
+                                sha256: file.sha256, sizeBytes: file.sizeBytes)
+                            results.append(UploadResult(file: file, uploadID: uploadID,
+                                                        deduplicated: response.deduplicated))
                         }
-                        syncedInSession += 1
-                        syncedCount = baseSyncedCount + syncedInSession
+
+                        // Only mark tracker after ALL files for this asset succeed.
+                        if !Task.isCancelled {
+                            for r in results {
+                                if r.deduplicated {
+                                    skipped += 1
+                                    log.info("  ↩ Deduplicated: \(r.file.filename)")
+                                } else {
+                                    uploaded += 1
+                                    bytesTotal += r.file.sizeBytes
+                                    log.info("  ✓ Uploaded: \(r.file.filename)")
+                                }
+                                await tracker.markUploaded(
+                                    identifier: r.uploadID, filename: r.file.filename,
+                                    sha256: r.file.sha256, sizeBytes: r.file.sizeBytes,
+                                    mediaType: r.file.mediaType,
+                                    serverURL: settings.serverURL?.absoluteString ?? "",
+                                    modificationDate: asset.modificationDate)
+                            }
+                            syncedInSession += 1
+                            syncedCount = baseSyncedCount + syncedInSession
+                        }
+                        lastError = nil
+                        break // success — exit retry loop
+                    } catch {
+                        lastError = error
+                        if attempt < 3, !Task.isCancelled {
+                            let delay: UInt64 = attempt == 1 ? 5_000_000_000 : 15_000_000_000
+                            log.warning("  ⚠ Attempt \(attempt)/3 failed for \(name): \(error.localizedDescription) — retrying in \(attempt == 1 ? 5 : 15)s")
+                            try? await Task.sleep(nanoseconds: delay)
+                        }
                     }
-                } catch {
+                }
+                if let error = lastError {
                     failed += 1
                     failedIdentifiers.insert(asset.localIdentifier)
-                    log.error("  ✗ Failed \(name): \(error.localizedDescription)")
+                    log.error("  ✗ Failed \(name) after 3 attempts: \(error.localizedDescription)")
                 }
 
                 session.uploadedCount = uploaded
@@ -226,6 +244,17 @@ final class SyncEngine: ObservableObject {
             }
 
             log.info("■ Sync complete — uploaded: \(uploaded), skipped: \(skipped), failed: \(failed)")
+
+            // Completeness audit: log how many assets from the full library are now on the server.
+            let totalLib = allAssets.count
+            let coverage = syncedCount
+            let remaining = max(0, totalLib - coverage)
+            if remaining > 0 {
+                log.warning("■ Coverage: \(coverage)/\(totalLib) — \(remaining) asset(s) not yet on server")
+            } else {
+                log.info("■ Coverage: \(coverage)/\(totalLib) — library fully backed up ✓")
+            }
+
             try? await apiClient.recordSyncSession(
                 sessionId: session.id, startedAt: session.startedAt, completedAt: Date(),
                 uploaded: uploaded, skipped: skipped, failed: failed, bytes: bytesTotal)
@@ -236,7 +265,13 @@ final class SyncEngine: ObservableObject {
             status = .completed(uploaded: uploaded, skipped: skipped, failed: failed)
             overallProgress = 1.0
             await apiClient.invalidateSession()   // release URLSession resources when idle
-            BackgroundSyncScheduler.shared.scheduleNextSync()
+
+            // If any assets failed, schedule a retry in 15 min; otherwise use the normal 1-hour cadence.
+            if failed > 0 {
+                BackgroundSyncScheduler.shared.scheduleAggressiveRetry()
+            } else {
+                BackgroundSyncScheduler.shared.scheduleNextSync()
+            }
 
         } catch {
             log.error("✗ Sync failed: \(error.localizedDescription)")
