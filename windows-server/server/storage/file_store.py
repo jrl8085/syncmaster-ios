@@ -54,7 +54,7 @@ def _make_dest_dir(creation_date: Optional[str], device_folder: str = "") -> Pat
         dt = datetime.fromisoformat(creation_date.rstrip("Z")) if creation_date else datetime.utcnow()
     except ValueError:
         dt = datetime.utcnow()
-    month_name = dt.strftime("%B")  # e.g. "January"
+    month_name = f"{dt.month} - {dt.strftime('%B')}"  # e.g. "1 - January"
     d = get_storage_root()
     if device_folder:
         d = d / device_folder

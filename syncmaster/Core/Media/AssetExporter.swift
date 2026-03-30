@@ -18,11 +18,34 @@ enum ExportError: LocalizedError {
 }
 
 struct ExportedFile {
-    let url: URL
+    /// Non-nil when the file was written to a temp file on disk.
+    let url: URL?
     let filename: String
     let sha256: String
     let sizeBytes: Int64
     let mediaType: MediaType
+    /// Non-nil in streaming mode — creates a fresh InputStream from the Photos resource
+    /// without requiring any disk space.
+    private let _resource: PHAssetResource?
+
+    init(url: URL, filename: String, sha256: String, sizeBytes: Int64, mediaType: MediaType) {
+        self.url = url; self.filename = filename; self.sha256 = sha256
+        self.sizeBytes = sizeBytes; self.mediaType = mediaType; self._resource = nil
+    }
+
+    init(resource: PHAssetResource, filename: String, sha256: String, sizeBytes: Int64, mediaType: MediaType) {
+        self.url = nil; self.filename = filename; self.sha256 = sha256
+        self.sizeBytes = sizeBytes; self.mediaType = mediaType; self._resource = resource
+    }
+
+    /// Returns a fresh InputStream for the file's raw bytes (no multipart framing).
+    /// Callers must open the stream. For disk-backed files this reads the temp file;
+    /// for streaming files it pipes directly from the Photos resource manager.
+    func openContentStream() -> InputStream? {
+        if let url { return InputStream(url: url) }
+        guard let resource = _resource else { return nil }
+        return AssetExporter.makeResourceStream(for: resource)
+    }
 }
 
 final class AssetExporter {
@@ -46,8 +69,6 @@ final class AssetExporter {
 
     // MARK: - Helpers (background-thread resource access)
 
-    /// Fetches asset resources on a background thread to avoid
-    /// "Missing prefetched properties" warnings on the main queue.
     nonisolated private func fetchResources(for asset: PHAsset) async -> [PHAssetResource] {
         await Task.detached { PHAssetResource.assetResources(for: asset) }.value
     }
@@ -91,15 +112,26 @@ final class AssetExporter {
         if let resource = resources.first(where: { $0.type == .video }) {
             let filename = sanitize(resource.originalFilename)
             let dest = tempDir.appendingPathComponent("\(id)_\(filename)")
-            try await writeResource(resource, to: dest)
-            let (sha, size) = try hashAndSize(dest)
-            return ExportedFile(url: dest, filename: filename, sha256: sha, sizeBytes: size, mediaType: mediaType)
+            do {
+                try await writeResource(resource, to: dest)
+                let (sha, size) = try hashAndSize(dest)
+                return ExportedFile(url: dest, filename: filename, sha256: sha, sizeBytes: size,
+                                    mediaType: mediaType)
+            } catch {
+                // Disk full or write error — fall back to streaming mode which reads directly
+                // from the Photos resource manager without writing anything to device storage.
+                log.warning("writeResource failed (\(error.localizedDescription, privacy: .public)) — switching to streaming mode for \(filename, privacy: .public)")
+                try? FileManager.default.removeItem(at: dest)
+                let (sha, size) = try await hashFromResource(resource)
+                return ExportedFile(resource: resource, filename: filename, sha256: sha, sizeBytes: size,
+                                    mediaType: mediaType)
+            }
         }
 
         // Fallback: AVAssetExportSession passthrough
         return try await withCheckedThrowingContinuation { cont in
             let opts = PHVideoRequestOptions()
-            opts.isNetworkAccessAllowed = true  // allow iCloud download for cloud-only assets
+            opts.isNetworkAccessAllowed = true
             opts.deliveryMode = .highQualityFormat
             opts.version = .original
             PHImageManager.default().requestExportSession(
@@ -108,11 +140,14 @@ final class AssetExporter {
                 guard let exportSession else {
                     cont.resume(throwing: ExportError.exportFailed("No export session")); return
                 }
-                let filename = "video_\(id).mov"
+                // Prefer mp4 container; fall back to mov if unsupported.
+                let outputType: AVFileType = exportSession.supportedFileTypes.contains(.mp4) ? .mp4 : .mov
+                let ext = outputType == .mp4 ? "mp4" : "mov"
+                let filename = "video_\(id).\(ext)"
                 let dest = self.tempDir.appendingPathComponent(filename)
                 try? FileManager.default.removeItem(at: dest)
                 exportSession.outputURL = dest
-                exportSession.outputFileType = .mov
+                exportSession.outputFileType = outputType
                 exportSession.exportAsynchronously {
                     switch exportSession.status {
                     case .completed:
@@ -132,16 +167,69 @@ final class AssetExporter {
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Streaming (no disk writes)
+
+    /// Computes SHA-256 and byte count from a PHAssetResource using in-memory chunks.
+    /// Does not write anything to disk — safe even when the device is full.
+    private func hashFromResource(_ resource: PHAssetResource) async throws -> (sha256: String, sizeBytes: Int64) {
+        try await withCheckedThrowingContinuation { cont in
+            let opts = PHAssetResourceRequestOptions()
+            opts.isNetworkAccessAllowed = true
+            var hasher = SHA256()
+            var size: Int64 = 0
+            PHAssetResourceManager.default().requestData(for: resource, options: opts) { chunk in
+                hasher.update(data: chunk)
+                size += Int64(chunk.count)
+            } completionHandler: { error in
+                if let error {
+                    cont.resume(throwing: ExportError.exportFailed(error.localizedDescription))
+                    return
+                }
+                let hex = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+                cont.resume(returning: (hex, size))
+            }
+        }
+    }
+
+    /// Creates an InputStream that pipes data from PHAssetResourceManager.requestData
+    /// directly via a bound stream pair — zero disk writes.
+    static func makeResourceStream(for resource: PHAssetResource) -> InputStream {
+        var readRef: Unmanaged<CFReadStream>?
+        var writeRef: Unmanaged<CFWriteStream>?
+        CFStreamCreateBoundPair(kCFAllocatorDefault, &readRef, &writeRef, 256 * 1024)
+        let inStream  = readRef!.takeRetainedValue()  as InputStream
+        let outStream = writeRef!.takeRetainedValue() as OutputStream
+        inStream.open()
+        outStream.open()
+
+        let opts = PHAssetResourceRequestOptions()
+        opts.isNetworkAccessAllowed = true
+        PHAssetResourceManager.default().requestData(for: resource, options: opts) { chunk in
+            chunk.withUnsafeBytes { buf in
+                guard let ptr = buf.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                var off = 0, rem = chunk.count
+                while rem > 0 {
+                    let n = outStream.write(ptr.advanced(by: off), maxLength: rem)
+                    guard n > 0 else { return }
+                    off += n; rem -= n
+                }
+            }
+        } completionHandler: { _ in
+            outStream.close()
+        }
+        return inStream
+    }
+
+    // MARK: - Disk helpers
 
     private func writeResource(_ resource: PHAssetResource, to url: URL) async throws {
         try? FileManager.default.removeItem(at: url)
         try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
             let opts = PHAssetResourceRequestOptions()
-            opts.isNetworkAccessAllowed = true  // allow iCloud download for cloud-only assets
+            opts.isNetworkAccessAllowed = true
             PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: opts) { err in
                 if let err {
-                    log.error("writeResource failed for \(resource.originalFilename): \(err.localizedDescription)")
+                    log.error("writeResource failed for \(resource.originalFilename, privacy: .public): \(err.localizedDescription, privacy: .public) [\(String(describing: err), privacy: .public)]")
                     cont.resume(throwing: ExportError.exportFailed(err.localizedDescription))
                 } else {
                     cont.resume()

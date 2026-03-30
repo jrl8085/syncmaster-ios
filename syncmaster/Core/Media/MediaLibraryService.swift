@@ -69,6 +69,19 @@ final class MediaLibraryService: ObservableObject {
         return isRaw ? .raw : .photo
     }
 
+    /// Updates every item's uploadState based on the set of uploaded identifiers from the tracker.
+    func applyUploadStates(_ uploadedIdentifiers: Set<String>) {
+        for i in allAssets.indices {
+            allAssets[i].uploadState = uploadedIdentifiers.contains(allAssets[i].id) ? .uploaded : .pending
+        }
+    }
+
+    /// Marks a single item as uploaded (called in real-time during sync).
+    func markUploaded(id: String) {
+        guard let i = allAssets.firstIndex(where: { $0.id == id }) else { return }
+        allAssets[i].uploadState = .uploaded
+    }
+
     var totalCount: Int { allAssets.count }
     var photoCount: Int { allAssets.filter { !$0.isVideo }.count }
     var videoCount: Int { allAssets.filter { $0.isVideo }.count }

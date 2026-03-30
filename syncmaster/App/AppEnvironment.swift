@@ -43,6 +43,12 @@ final class AppEnvironment: ObservableObject {
         Task { await syncEngine.refreshSyncedCount() }
         setupServerCountRefresh()
         setupCertAutoValidation()
+        Task {
+            // Wait for reachability to resolve then do an initial server count fetch.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard self.networkMonitor.serverReachable else { return }
+            await self.syncEngine.refreshAndIndexIfNeeded()
+        }
         // Populate photo/video counts immediately if permission was already granted.
         let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if authStatus == .authorized || authStatus == .limited {
@@ -51,25 +57,24 @@ final class AppEnvironment: ObservableObject {
     }
 
     private func setupServerCountRefresh() {
-        // Refresh backed-up count from the server every time the app becomes active.
-        // This keeps the progress accurate across restarts and catches any manual
-        // changes on the server side (e.g. files deleted from the storage folder).
+        // Fires every time the app becomes active AND the server is already reachable.
         NotificationCenter.default
             .publisher(for: UIApplication.didBecomeActiveNotification)
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self, self.networkMonitor.serverReachable else { return }
-                Task { await self.syncEngine.refreshSyncedCountFromServer() }
+                Task { await self.syncEngine.refreshAndIndexIfNeeded() }
             }
             .store(in: &cancellables)
 
-        // Also trigger immediately the first time the server becomes reachable
-        // (covers cold launch where the notification may have already fired).
+        // Fires every time the server transitions to reachable (covers cold launch
+        // where the active notification may have fired before reachability resolved).
         networkMonitor.$serverReachable
             .filter { $0 }
-            .first()
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
             .sink { [weak self] _ in
-                Task { await self?.syncEngine.refreshSyncedCountFromServer() }
+                guard let self else { return }
+                Task { await self.syncEngine.refreshAndIndexIfNeeded() }
             }
             .store(in: &cancellables)
     }
