@@ -94,6 +94,11 @@ actor IncrementalTracker {
         return true
     }
 
+    func uploadedIdentifiers() async -> Set<String> {
+        if !loaded { await preload() }
+        return uploaded
+    }
+
     /// Count of unique assets synced, excluding the paired-video component of live photos.
     func syncedAssetCount() async -> Int {
         if !loaded { await preload() }

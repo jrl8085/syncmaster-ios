@@ -52,6 +52,9 @@ final class SyncEngine: ObservableObject {
     let apiClient: SyncAPIClient
     private let exporter: AssetExporter
     private var syncTask: Task<Void, Never>?
+    /// Local cache of uploaded identifiers — used to reapply states when allAssets reloads.
+    private var uploadedIDs: Set<String> = []
+    private var cancellables: Set<AnyCancellable> = []
 
     init(settings: SyncSettings, networkMonitor: NetworkMonitor,
          mediaLibrary: MediaLibraryService, tracker: IncrementalTracker,
@@ -59,6 +62,15 @@ final class SyncEngine: ObservableObject {
         self.settings = settings; self.networkMonitor = networkMonitor
         self.mediaLibrary = mediaLibrary; self.tracker = tracker
         self.apiClient = apiClient; self.exporter = exporter
+
+        // Re-apply upload states whenever the library reloads (e.g. user taps refresh).
+        mediaLibrary.$allAssets
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.mediaLibrary.applyUploadStates(self.uploadedIDs)
+            }
+            .store(in: &cancellables)
     }
 
     func refreshSyncedCount() async {
@@ -73,6 +85,8 @@ final class SyncEngine: ObservableObject {
             syncedCount = manifest.files.filter { isConfirmedAsset($0) }.count
             serverFileCount = manifest.files.filter { isConfirmedAsset($0) }.count
             log.info("serverFileCount updated to \(self.serverFileCount, privacy: .public)")
+            uploadedIDs = await tracker.uploadedIdentifiers()
+            mediaLibrary.applyUploadStates(uploadedIDs)
         } catch {
             log.error("Failed to fetch server manifest: \(String(describing: error), privacy: .public)")
         }
@@ -166,9 +180,13 @@ final class SyncEngine: ObservableObject {
                 await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
                 syncedCount = manifest.files.filter { isConfirmedAsset($0) }.count
                 serverFileCount = manifest.files.filter { isConfirmedAsset($0) }.count
+                uploadedIDs = await tracker.uploadedIdentifiers()
+                mediaLibrary.applyUploadStates(uploadedIDs)
             } else {
                 log.warning("Could not fetch server manifest — using local tracker")
                 syncedCount = await tracker.syncedAssetCount()
+                uploadedIDs = await tracker.uploadedIdentifiers()
+                mediaLibrary.applyUploadStates(uploadedIDs)
             }
             let baseSyncedCount = syncedCount
             // Build a sha256 index of everything already on the server.
@@ -293,7 +311,10 @@ final class SyncEngine: ObservableObject {
                                     mediaType: r.file.mediaType,
                                     serverURL: settings.serverURL?.absoluteString ?? "",
                                     modificationDate: asset.modificationDate)
+                                uploadedIDs.insert(r.uploadID)
                             }
+                            // Update the library item immediately so the UI reflects the change.
+                            mediaLibrary.markUploaded(id: asset.localIdentifier)
                             syncedInSession += 1
                             syncedCount = baseSyncedCount + syncedInSession
                         }

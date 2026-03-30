@@ -140,11 +140,14 @@ final class AssetExporter {
                 guard let exportSession else {
                     cont.resume(throwing: ExportError.exportFailed("No export session")); return
                 }
-                let filename = "video_\(id).mov"
+                // Prefer mp4 container; fall back to mov if unsupported.
+                let outputType: AVFileType = exportSession.supportedFileTypes.contains(.mp4) ? .mp4 : .mov
+                let ext = outputType == .mp4 ? "mp4" : "mov"
+                let filename = "video_\(id).\(ext)"
                 let dest = self.tempDir.appendingPathComponent(filename)
                 try? FileManager.default.removeItem(at: dest)
                 exportSession.outputURL = dest
-                exportSession.outputFileType = .mov
+                exportSession.outputFileType = outputType
                 exportSession.exportAsynchronously {
                     switch exportSession.status {
                     case .completed:
