@@ -1,4 +1,5 @@
 import SwiftUI
+import Photos
 
 struct DashboardView: View {
     @EnvironmentObject var syncEngine: SyncEngine
@@ -15,6 +16,7 @@ struct DashboardView: View {
                     StatisticsCard()
                     QuickActionsCard()
                     LastSyncCard()
+                    ClearMediaCard()
                 }
                 .padding()
             }
@@ -188,7 +190,7 @@ struct QuickActionsCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 Text("Actions").font(.headline)
                 HStack(spacing: 10) {
-                    if syncEngine.status.isActive {
+                    if syncEngine.status.isActive && networkMonitor.serverReachable {
                         ActionBtn(title: "Pause", icon: "pause.fill", color: .orange) { syncEngine.pauseSync() }
                         ActionBtn(title: "Stop", icon: "stop.fill", color: .red) { syncEngine.stopSync() }
                     } else {
@@ -236,6 +238,68 @@ struct LastSyncCard: View {
                     }
                 }
                 Spacer()
+            }
+        }
+    }
+}
+
+// MARK: - Clear Device Media
+
+struct ClearMediaCard: View {
+    @EnvironmentObject var mediaLibrary: MediaLibraryService
+    @EnvironmentObject var syncEngine: SyncEngine
+
+    @State private var showConfirmation = false
+    @State private var isDeleting = false
+
+    var effectiveBacked: Int {
+        min(mediaLibrary.totalCount,
+            max(syncEngine.syncedCount, syncEngine.serverFileCount))
+    }
+
+    var allUploaded: Bool {
+        mediaLibrary.totalCount > 0 && effectiveBacked >= mediaLibrary.totalCount
+    }
+
+    var body: some View {
+        if allUploaded {
+            DashCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text("All media backed up").font(.headline)
+                    }
+                    Text("Every photo and video on this device has been uploaded to your server.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Button {
+                        showConfirmation = true
+                    } label: {
+                        Label(isDeleting ? "Deleting…" : "Clear Device Media", systemImage: "trash")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 11)
+                            .background(isDeleting ? Color.gray : Color.red, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .disabled(isDeleting)
+                    .confirmationDialog(
+                        "Remove all media from this device?",
+                        isPresented: $showConfirmation,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Yes, Delete Everything", role: .destructive) {
+                            Task {
+                                isDeleting = true
+                                await mediaLibrary.deleteAllAssets()
+                                isDeleting = false
+                            }
+                        }
+                        Button("No", role: .cancel) {}
+                    } message: {
+                        Text("Are you sure you want to remove all images and videos from this device? This cannot be undone.")
+                    }
+                }
             }
         }
     }

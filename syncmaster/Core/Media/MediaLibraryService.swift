@@ -7,6 +7,7 @@ final class MediaLibraryService: ObservableObject {
     @Published private(set) var authorizationStatus: PHAuthorizationStatus = .notDetermined
     @Published private(set) var allAssets: [MediaItem] = []
     @Published private(set) var isLoading = false
+    private var isUpdatingStates = false
 
     init() {
         authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -71,15 +72,39 @@ final class MediaLibraryService: ObservableObject {
 
     /// Updates every item's uploadState based on the set of uploaded identifiers from the tracker.
     func applyUploadStates(_ uploadedIdentifiers: Set<String>) {
-        for i in allAssets.indices {
-            allAssets[i].uploadState = uploadedIdentifiers.contains(allAssets[i].id) ? .uploaded : .pending
+        guard !isUpdatingStates else { return }
+        isUpdatingStates = true
+        defer { isUpdatingStates = false }
+        // Single assignment so @Published only fires once, preventing the
+        // SyncEngine sink from re-entering this method on every element mutation.
+        allAssets = allAssets.map { item in
+            var copy = item
+            copy.uploadState = uploadedIdentifiers.contains(item.id) ? .uploaded : .pending
+            return copy
         }
     }
 
     /// Marks a single item as uploaded (called in real-time during sync).
     func markUploaded(id: String) {
-        guard let i = allAssets.firstIndex(where: { $0.id == id }) else { return }
+        guard !isUpdatingStates, let i = allAssets.firstIndex(where: { $0.id == id }) else { return }
+        isUpdatingStates = true
+        defer { isUpdatingStates = false }
         allAssets[i].uploadState = .uploaded
+    }
+
+    func deleteAllAssets() async {
+        let ids = allAssets.map(\.id)
+        guard !ids.isEmpty else { return }
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
+        guard result.count > 0 else { return }
+        do {
+            try await PHPhotoLibrary.shared().performChanges {
+                PHAssetChangeRequest.deleteAssets(result)
+            }
+        } catch {
+            // User denied or system error — nothing to do
+        }
+        await loadAssets()
     }
 
     var totalCount: Int { allAssets.count }

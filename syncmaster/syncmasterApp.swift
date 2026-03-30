@@ -4,6 +4,7 @@ import BackgroundTasks
 @main
 struct syncmasterApp: App {
     @StateObject private var env = AppEnvironment.shared
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         BackgroundSyncScheduler.shared.registerTasks()
@@ -26,6 +27,11 @@ struct syncmasterApp: App {
             .environmentObject(env.networkMonitor)
             .environmentObject(env.settings)
             .environmentObject(env.mediaLibrary)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background {
+                BackgroundSyncScheduler.shared.beginBackgroundExecution()
+            }
         }
     }
 }

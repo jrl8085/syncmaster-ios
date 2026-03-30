@@ -55,6 +55,8 @@ final class SyncEngine: ObservableObject {
     /// Local cache of uploaded identifiers — used to reapply states when allAssets reloads.
     private var uploadedIDs: Set<String> = []
     private var cancellables: Set<AnyCancellable> = []
+    /// Prevents concurrent calls to refreshAndIndexIfNeeded / refreshSyncedCountFromServer.
+    private var isRefreshing = false
 
     init(settings: SyncSettings, networkMonitor: NetworkMonitor,
          mediaLibrary: MediaLibraryService, tracker: IncrementalTracker,
@@ -78,6 +80,10 @@ final class SyncEngine: ObservableObject {
     }
 
     func refreshSyncedCountFromServer() async {
+        guard networkMonitor.serverReachable else { return }
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
         do {
             let manifest = try await apiClient.fetchManifest()
             log.info("Manifest fetched: \(manifest.files.count, privacy: .public) file(s) for this device folder")
@@ -94,7 +100,8 @@ final class SyncEngine: ObservableObject {
 
     func refreshAndIndexIfNeeded() async {
         log.info("refreshAndIndexIfNeeded called (serverFileCount=\(self.serverFileCount, privacy: .public))")
-        guard !status.isActive else { return }
+        guard networkMonitor.serverReachable else { return }
+        guard !status.isActive, !isRefreshing else { return }
         if serverFileCount == 0 {
             do {
                 let result = try await apiClient.indexServerFiles()
@@ -115,6 +122,7 @@ final class SyncEngine: ObservableObject {
     func startSync() async {
         guard !status.isActive else { return }
         guard networkMonitor.isConnected else { status = .failed(error: "No network"); return }
+        guard networkMonitor.serverReachable else { status = .failed(error: "Server unreachable"); return }
         guard settings.serverURL != nil else { status = .failed(error: "No server configured"); return }
         syncTask = Task { await performSync() }
     }
@@ -141,7 +149,11 @@ final class SyncEngine: ObservableObject {
     }
 
     func resetSyncRecords() async {
+        let inflightTask = syncTask
         stopSync()
+        // Wait for the cancelled sync to fully exit before touching the tracker,
+        // so there's no race between tracker.reset() and tracker.markUploaded().
+        await inflightTask?.value
         await tracker.reset()
         failedIdentifiers = []
         // Index the server filesystem before reading counts — ensures any files already on
@@ -169,7 +181,8 @@ final class SyncEngine: ObservableObject {
             }
 
             // Ask server to prune entries for files deleted from disk, then fetch fresh manifest.
-            if let pruned = try? await apiClient.reconcileServerManifest(), pruned > 0 {
+            if networkMonitor.serverReachable,
+               let pruned = try? await apiClient.reconcileServerManifest(), pruned > 0 {
                 log.info("Server reconcile: pruned \(pruned) stale manifest entry(s)")
             }
 
@@ -213,17 +226,21 @@ final class SyncEngine: ObservableObject {
             }.value
             log.info("Photo library: \(allAssets.count) total asset(s)")
 
-            // Diff — for live photos both image AND video must be present to skip.
-            var toUpload: [PHAsset] = []
-            for asset in allAssets {
-                if Task.isCancelled { break }
-                let isLive = asset.mediaSubtypes.contains(.photoLive)
-                if !(await tracker.isFullyUploaded(identifier: asset.localIdentifier, isLivePhoto: isLive)) {
-                    toUpload.append(asset)
+            // Diff — use the already-fetched uploadedIDs for a single-pass check off the main actor,
+            // avoiding thousands of per-asset actor hops that would block the run loop.
+            // Sort: photos (including live photos) before videos so large video files don't
+            // block progress during short background execution windows.
+            guard !Task.isCancelled else { return }
+            let localUploadedIDs = uploadedIDs
+            let toUpload: [PHAsset] = await Task.detached(priority: .userInitiated) {
+                let pending = allAssets.filter { asset in
+                    let isLive = asset.mediaSubtypes.contains(.photoLive)
+                    return !localUploadedIDs.contains(asset.localIdentifier) ||
+                           (isLive && !localUploadedIDs.contains(asset.localIdentifier + "-video"))
                 }
-            }
-
-            guard !Task.isCancelled else { status = .paused; return }
+                return pending.filter { $0.mediaType != .video } + pending.filter { $0.mediaType == .video }
+            }.value
+            guard !Task.isCancelled else { return }
             log.info("Diff complete: \(toUpload.count) asset(s) need uploading")
             session.totalAssets = toUpload.count
             currentSession = session
@@ -239,6 +256,7 @@ final class SyncEngine: ObservableObject {
                     let name = PHAssetResource.assetResources(for: asset).first?.originalFilename ?? "media"
                     return (type, name)
                 }.value
+                if Task.isCancelled { break }
                 log.info("[\(idx + 1)/\(toUpload.count)] Exporting \(name) (\(mediaType.rawValue))")
                 status = .uploading(current: idx + 1, total: toUpload.count, filename: name)
                 overallProgress = Double(idx) / Double(max(toUpload.count, 1))
@@ -249,6 +267,7 @@ final class SyncEngine: ObservableObject {
                     let file: ExportedFile; let uploadID: String; let deduplicated: Bool
                 }
                 var lastError: Error? = nil
+                var attempts = 0
                 for attempt in 1...3 {
                     if Task.isCancelled { break }
                     do {
@@ -322,7 +341,10 @@ final class SyncEngine: ObservableObject {
                         break // success — exit retry loop
                     } catch {
                         lastError = error
-                        if attempt < 3, !Task.isCancelled {
+                        attempts = attempt
+                        let wasCancelled = Task.isCancelled || (error as? URLError)?.code == .cancelled
+                        if wasCancelled { break }
+                        if attempt < 3 {
                             let delay: UInt64 = attempt == 1 ? 5_000_000_000 : 15_000_000_000
                             log.warning("  ⚠ Attempt \(attempt)/3 failed for \(name, privacy: .public): \(String(describing: error), privacy: .public) — retrying in \(attempt == 1 ? 5 : 15)s")
                             try? await Task.sleep(nanoseconds: delay)
@@ -332,7 +354,7 @@ final class SyncEngine: ObservableObject {
                 if let error = lastError {
                     failed += 1
                     failedIdentifiers.insert(asset.localIdentifier)
-                    log.error("  ✗ Failed \(name, privacy: .public) (type: \(mediaType.rawValue, privacy: .public)) after 3 attempts: \(String(describing: error), privacy: .public)")
+                    log.error("  ✗ Failed \(name, privacy: .public) (type: \(mediaType.rawValue, privacy: .public)) after \(attempts) attempt(s): \(String(describing: error), privacy: .public)")
                 }
 
                 session.uploadedCount = uploaded
@@ -342,6 +364,7 @@ final class SyncEngine: ObservableObject {
                 currentSession = session
             }
 
+            guard !Task.isCancelled else { return }
             log.info("■ Sync complete — uploaded: \(uploaded), skipped: \(skipped), failed: \(failed)")
 
             // Completeness audit: log how many assets from the full library are now on the server.

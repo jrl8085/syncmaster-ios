@@ -1,6 +1,7 @@
 import Foundation
 import BackgroundTasks
 import UserNotifications
+import UIKit
 import OSLog
 
 private let log = Logger(subsystem: "com.syncmaster", category: "BackgroundSync")
@@ -88,6 +89,33 @@ final class BackgroundSyncScheduler {
             workTask.cancel()
             Task { @MainActor in AppEnvironment.shared.syncEngine.pauseSync() }
             task.setTaskCompleted(success: false)
+        }
+    }
+
+    // MARK: - Immediate background execution
+
+    /// Call when the app goes to background (scene phase `.background`).
+    /// iOS grants ~30 seconds of execution time so an active sync can continue,
+    /// or a new one can start, before the process is suspended.
+    func beginBackgroundExecution() {
+        var bgTaskID: UIBackgroundTaskIdentifier = .invalid
+        bgTaskID = UIApplication.shared.beginBackgroundTask(withName: "syncmaster.background") {
+            // Time expired — iOS is suspending the app. Don't cancel the sync;
+            // let iOS suspend the URLSession naturally so it can resume on next foreground.
+            log.warning("Background execution time expired — app suspending")
+            UIApplication.shared.endBackgroundTask(bgTaskID)
+            bgTaskID = .invalid
+        }
+        guard bgTaskID != .invalid else { return }
+
+        Task { @MainActor in
+            log.info("Background execution started")
+            await AppEnvironment.shared.syncEngine.startSyncAndWait()
+            log.info("Background execution finished")
+            if bgTaskID != .invalid {
+                UIApplication.shared.endBackgroundTask(bgTaskID)
+                bgTaskID = .invalid
+            }
         }
     }
 

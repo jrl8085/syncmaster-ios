@@ -96,11 +96,11 @@ final class AppEnvironment: ObservableObject {
     }
 
     private func setupAutoSync() {
-        networkMonitor.$isConnectedToLocalNetwork
+        networkMonitor.$serverReachable
             .combineLatest(settings.$autoSyncEnabled)
             .debounce(for: .seconds(2), scheduler: RunLoop.main)
-            .sink { [weak self] isLocal, autoEnabled in
-                guard let self, autoEnabled, isLocal else { return }
+            .sink { [weak self] isReachable, autoEnabled in
+                guard let self, autoEnabled, isReachable else { return }
                 Task { await self.syncEngine.startSync() }
             }
             .store(in: &cancellables)
