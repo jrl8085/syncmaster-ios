@@ -66,15 +66,28 @@ final class SyncEngine: ObservableObject {
     }
 
     func refreshSyncedCountFromServer() async {
-        guard let manifest = try? await apiClient.fetchManifest() else { return }
-        await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
-        syncedCount = manifest.files.filter { isConfirmedAsset($0) }.count
-        serverFileCount = manifest.files.filter { isConfirmedAsset($0) }.count
+        do {
+            let manifest = try await apiClient.fetchManifest()
+            log.info("Manifest fetched: \(manifest.files.count, privacy: .public) file(s) for this device folder")
+            await tracker.reconcileWithServer(identifiers: manifest.files.map { $0.identifier })
+            syncedCount = manifest.files.filter { isConfirmedAsset($0) }.count
+            serverFileCount = manifest.files.filter { isConfirmedAsset($0) }.count
+            log.info("serverFileCount updated to \(self.serverFileCount, privacy: .public)")
+        } catch {
+            log.error("Failed to fetch server manifest: \(String(describing: error), privacy: .public)")
+        }
     }
 
     func refreshAndIndexIfNeeded() async {
+        log.info("refreshAndIndexIfNeeded called (serverFileCount=\(self.serverFileCount, privacy: .public))")
+        guard !status.isActive else { return }
         if serverFileCount == 0 {
-            _ = try? await apiClient.indexServerFiles()
+            do {
+                let result = try await apiClient.indexServerFiles()
+                log.info("Server index: \(result.indexed, privacy: .public) new, \(result.alreadyKnown, privacy: .public) known")
+            } catch {
+                log.error("indexServerFiles failed: \(String(describing: error), privacy: .public)")
+            }
         }
         await refreshSyncedCountFromServer()
     }
@@ -223,7 +236,7 @@ final class SyncEngine: ObservableObject {
                     do {
                         let files = try await exporter.export(asset: asset, mediaType: mediaType)
                         log.info("  Exported \(files.count) file(s) for \(name) (attempt \(attempt))")
-                        defer { files.forEach { exporter.cleanupTempFile(at: $0.url) } }
+                        defer { files.forEach { if let url = $0.url { exporter.cleanupTempFile(at: url) } } }
 
                         // Upload all files for this asset; accumulate results before marking the
                         // tracker so a partial failure doesn't permanently hide the asset.
@@ -251,8 +264,11 @@ final class SyncEngine: ObservableObject {
                             }
 
                             log.info("  Uploading \(file.filename) (\(file.sizeBytes) bytes)")
+                            guard let contentStream = file.openContentStream() else {
+                                throw ExportError.exportFailed("No content stream for \(file.filename)")
+                            }
                             let response = try await apiClient.uploadFile(
-                                fileURL: file.url, identifier: uploadID,
+                                contentStream: contentStream, identifier: uploadID,
                                 filename: file.filename, mediaType: file.mediaType,
                                 creationDate: asset.creationDate,
                                 sha256: file.sha256, sizeBytes: file.sizeBytes)
@@ -287,7 +303,7 @@ final class SyncEngine: ObservableObject {
                         lastError = error
                         if attempt < 3, !Task.isCancelled {
                             let delay: UInt64 = attempt == 1 ? 5_000_000_000 : 15_000_000_000
-                            log.warning("  ⚠ Attempt \(attempt)/3 failed for \(name): \(error.localizedDescription) — retrying in \(attempt == 1 ? 5 : 15)s")
+                            log.warning("  ⚠ Attempt \(attempt)/3 failed for \(name, privacy: .public): \(String(describing: error), privacy: .public) — retrying in \(attempt == 1 ? 5 : 15)s")
                             try? await Task.sleep(nanoseconds: delay)
                         }
                     }
@@ -295,7 +311,7 @@ final class SyncEngine: ObservableObject {
                 if let error = lastError {
                     failed += 1
                     failedIdentifiers.insert(asset.localIdentifier)
-                    log.error("  ✗ Failed \(name) after 3 attempts: \(error.localizedDescription)")
+                    log.error("  ✗ Failed \(name, privacy: .public) (type: \(mediaType.rawValue, privacy: .public)) after 3 attempts: \(String(describing: error), privacy: .public)")
                 }
 
                 session.uploadedCount = uploaded
@@ -336,7 +352,7 @@ final class SyncEngine: ObservableObject {
             }
 
         } catch {
-            log.error("✗ Sync failed: \(error.localizedDescription)")
+            log.error("✗ Sync failed: \(String(describing: error), privacy: .public)")
             status = .failed(error: error.localizedDescription)
         }
     }

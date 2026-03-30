@@ -35,6 +35,9 @@ struct DashboardView: View {
             }
             .refreshable {
                 await networkMonitor.checkServerReachability()
+                if networkMonitor.serverReachable {
+                    await syncEngine.refreshAndIndexIfNeeded()
+                }
             }
         }
     }

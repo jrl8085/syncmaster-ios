@@ -67,21 +67,23 @@ struct UploadResponse: Decodable {
 actor SyncAPIClient {
     private let settings: SyncSettings
     private let keychain: KeychainService
-    private var _session: URLSession?
+    private var _session: URLSession?       // long timeout — uploads
+    private var _lightSession: URLSession?  // short timeout — health / manifest / small API calls
 
     init(settings: SyncSettings, keychain: KeychainService) {
         self.settings = settings
         self.keychain = keychain
     }
 
-    // Rebuild session when fingerprint changes
-    func invalidateSession() { _session = nil }
+    // Rebuild sessions when fingerprint changes
+    func invalidateSession() { _session = nil; _lightSession = nil }
 
+    /// Long-timeout session for file uploads (up to 5 min waiting for server response).
     private func session() async -> URLSession {
         if let s = _session { return s }
         let fp = await settings.sslFingerprint
         let cfg = URLSessionConfiguration.default
-        cfg.timeoutIntervalForRequest = 30
+        cfg.timeoutIntervalForRequest = 300
         cfg.timeoutIntervalForResource = 3600
         let s = URLSession(configuration: cfg,
                            delegate: SSLPinningDelegate(fingerprint: fp),
@@ -90,22 +92,44 @@ actor SyncAPIClient {
         return s
     }
 
+    /// Short-timeout session for lightweight API calls (health, manifest, index).
+    private func lightSession() async -> URLSession {
+        if let s = _lightSession { return s }
+        let fp = await settings.sslFingerprint
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 30
+        cfg.timeoutIntervalForResource = 60
+        let s = URLSession(configuration: cfg,
+                           delegate: SSLPinningDelegate(fingerprint: fp),
+                           delegateQueue: nil)
+        _lightSession = s
+        return s
+    }
+
     func healthCheck() async throws -> HealthResponse {
         try decode(HealthResponse.self, from: try await get("health"))
     }
 
     func fetchManifest(since: Date? = nil) async throws -> ManifestResponse {
-        let folder = await settings.deviceFolder.addingPercentEncoding(
-            withAllowedCharacters: .urlQueryAllowed) ?? ""
-        var path = "manifest?device_folder=\(folder)"
+        guard let serverURL = await settings.serverURL else { throw APIError.noServerConfigured }
+        let folder = await settings.deviceFolder
+        var items = [URLQueryItem(name: "device_folder", value: folder)]
         if let since {
-            path += "&since=\(ISO8601DateFormatter().string(from: since))"
+            items.append(URLQueryItem(name: "since", value: ISO8601DateFormatter().string(from: since)))
         }
-        return try decode(ManifestResponse.self, from: try await get(path))
+        let url = serverURL.appendingPathComponent("manifest").appending(queryItems: items)
+        var req = URLRequest(url: url)
+        req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
+        do {
+            let (data, response) = try await lightSession().data(for: req)
+            try validateResponse(response, data: data)
+            return try decode(ManifestResponse.self, from: data)
+        } catch let e as APIError { throw e
+        } catch { throw APIError.networkError(error) }
     }
 
     func uploadFile(
-        fileURL: URL,
+        contentStream: InputStream,
         identifier: String,
         filename: String,
         mediaType: MediaType,
@@ -121,43 +145,35 @@ actor SyncAPIClient {
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
         req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
 
-        // Stream multipart body to a temp file to avoid loading large files into RAM.
-        let tempFile = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString + ".multipart")
-        defer { try? FileManager.default.removeItem(at: tempFile) }
-
-        FileManager.default.createFile(atPath: tempFile.path, contents: nil)
-        let writer = try FileHandle(forWritingTo: tempFile)
-
-        func writeString(_ s: String) throws {
-            try writer.write(contentsOf: Data(s.utf8))
-        }
+        // Build tiny preamble + epilogue in memory (only text fields, no file bytes).
         let isoDate = creationDate.map { ISO8601DateFormatter().string(from: $0) } ?? ""
-        func writeField(_ name: String, _ value: String) throws {
-            try writeString("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n")
+        var preamble = Data()
+        func appendField(_ name: String, _ value: String) {
+            preamble += Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8)
         }
-        try writeField("identifier", identifier)
-        try writeField("filename", filename)
-        try writeField("media_type", mediaType.rawValue)
-        try writeField("creation_date", isoDate)
-        try writeField("sha256", sha256)
-        try writeField("size_bytes", String(sizeBytes))
-        try writeField("device_folder", await settings.deviceFolder)
-        try writeString("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+        appendField("identifier", identifier)
+        appendField("filename", filename)
+        appendField("media_type", mediaType.rawValue)
+        appendField("creation_date", isoDate)
+        appendField("sha256", sha256)
+        appendField("size_bytes", String(sizeBytes))
+        appendField("device_folder", await settings.deviceFolder)
+        preamble += Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8)
+        let epilogue = Data("\r\n--\(boundary)--\r\n".utf8)
 
-        // Copy file payload in 1 MB chunks.
-        let reader = try FileHandle(forReadingFrom: fileURL)
-        let chunkSize = 1024 * 1024
-        while true {
-            let chunk = reader.readData(ofLength: chunkSize)
-            if chunk.isEmpty { break }
-            try writer.write(contentsOf: chunk)
-        }
-        try reader.close()
-        try writeString("\r\n--\(boundary)--\r\n")
-        try writer.close()
+        let totalLength = Int64(preamble.count) + sizeBytes + Int64(epilogue.count)
+        req.setValue(String(totalLength), forHTTPHeaderField: "Content-Length")
 
-        let (data, response) = try await session().upload(for: req, fromFile: tempFile)
+        // Chain: preamble → caller's content stream → epilogue.
+        // The caller owns the content stream (disk-backed or Photos pipe).
+        // No extra temp file is written — zero additional disk space required.
+        req.httpBodyStream = ChainedInputStream(streams: [
+            InputStream(data: preamble),
+            contentStream,
+            InputStream(data: epilogue)
+        ])
+
+        let (data, response) = try await session().data(for: req)
         try validateResponse(response, data: data)
         return try decode(UploadResponse.self, from: data)
     }
@@ -218,7 +234,7 @@ actor SyncAPIClient {
             .appending(queryItems: [URLQueryItem(name: "device_folder", value: folder)]))
         req.httpMethod = "DELETE"
         req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
-        let (data, response) = try await session().data(for: req)
+        let (data, response) = try await lightSession().data(for: req)
         try validateResponse(response, data: data)
     }
 
@@ -241,7 +257,7 @@ actor SyncAPIClient {
         var req = URLRequest(url: serverURL.appendingPathComponent(path))
         req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
         do {
-            let (data, response) = try await session().data(for: req)
+            let (data, response) = try await lightSession().data(for: req)
             try validateResponse(response, data: data)
             return data
         } catch let e as APIError { throw e
@@ -258,7 +274,7 @@ actor SyncAPIClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
         req.httpBody = try JSONSerialization.data(withJSONObject: json)
-        let (data, response) = try await session().data(for: req)
+        let (data, response) = try await lightSession().data(for: req)
         try validateResponse(response, data: data)
         return data
     }
@@ -276,5 +292,61 @@ actor SyncAPIClient {
     private func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
         do { return try JSONDecoder().decode(type, from: data) }
         catch { throw APIError.invalidResponse }
+    }
+}
+
+// MARK: - Streaming multipart helper
+
+/// Chains multiple InputStreams end-to-end so multipart uploads stream directly
+/// from the source file without buffering the entire body to disk.
+private final class ChainedInputStream: InputStream {
+    private let streams: [InputStream]
+    private var index = 0
+    private var _status: Stream.Status = .notOpen
+    private weak var _delegate: StreamDelegate?
+
+    init(streams: [InputStream]) {
+        self.streams = streams
+        super.init(data: Data())
+    }
+
+    override var delegate: StreamDelegate? {
+        get { _delegate }
+        set { _delegate = newValue }
+    }
+
+    override var streamStatus: Stream.Status { _status }
+    override var hasBytesAvailable: Bool { index < streams.count }
+
+    override func open() {
+        _status = .open
+        streams.forEach { $0.open() }
+    }
+
+    override func close() {
+        _status = .closed
+        streams.forEach { $0.close() }
+    }
+
+    override func read(_ buffer: UnsafeMutablePointer<UInt8>, maxLength len: Int) -> Int {
+        while index < streams.count {
+            let n = streams[index].read(buffer, maxLength: len)
+            if n > 0 { return n }
+            index += 1
+        }
+        return 0
+    }
+
+    override func getBuffer(
+        _ buffer: UnsafeMutablePointer<UnsafeMutablePointer<UInt8>?>,
+        length len: UnsafeMutablePointer<Int>
+    ) -> Bool { false }
+
+    override func schedule(in aRunLoop: RunLoop, forMode mode: RunLoop.Mode) {
+        streams.forEach { $0.schedule(in: aRunLoop, forMode: mode) }
+    }
+
+    override func remove(from aRunLoop: RunLoop, forMode mode: RunLoop.Mode) {
+        streams.forEach { $0.remove(from: aRunLoop, forMode: mode) }
     }
 }

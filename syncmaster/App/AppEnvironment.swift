@@ -43,6 +43,12 @@ final class AppEnvironment: ObservableObject {
         Task { await syncEngine.refreshSyncedCount() }
         setupServerCountRefresh()
         setupCertAutoValidation()
+        Task {
+            // Wait for reachability to resolve then do an initial server count fetch.
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            guard self.networkMonitor.serverReachable else { return }
+            await self.syncEngine.refreshAndIndexIfNeeded()
+        }
         // Populate photo/video counts immediately if permission was already granted.
         let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if authStatus == .authorized || authStatus == .limited {
