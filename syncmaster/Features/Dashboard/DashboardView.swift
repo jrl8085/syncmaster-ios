@@ -26,10 +26,11 @@ struct DashboardView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     HStack(spacing: 6) {
+                        let reachable = networkMonitor.serverReachable || syncEngine.status.isActive
                         Circle()
-                            .fill(networkMonitor.serverReachable ? Color.green : Color.orange)
+                            .fill(reachable ? Color.green : Color.orange)
                             .frame(width: 8, height: 8)
-                        Text(networkMonitor.serverReachable ? "Online" : "Offline")
+                        Text(reachable ? "Online" : "Offline")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -50,6 +51,12 @@ struct DashboardView: View {
 struct ConnectionCard: View {
     @EnvironmentObject var networkMonitor: NetworkMonitor
     @EnvironmentObject var settings: SyncSettings
+    @EnvironmentObject var syncEngine: SyncEngine
+
+    /// Active uploads prove connectivity even if the health-check ping times out.
+    var effectivelyReachable: Bool {
+        networkMonitor.serverReachable || syncEngine.status.isActive
+    }
 
     var body: some View {
         DashCard {
@@ -57,15 +64,15 @@ struct ConnectionCard: View {
                 Label {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Server Connection").font(.headline)
-                        Text(networkMonitor.serverReachable
+                        Text(effectivelyReachable
                              ? settings.serverHost
                              : (settings.serverHost.isEmpty ? "No server configured" : "Cannot reach server"))
                             .font(.subheadline)
-                            .foregroundStyle(networkMonitor.serverReachable ? Color.gray : Color.orange)
+                            .foregroundStyle(effectivelyReachable ? Color.gray : Color.orange)
                     }
                 } icon: {
-                    Image(systemName: networkMonitor.serverReachable ? "wifi" : "wifi.slash")
-                        .foregroundStyle(networkMonitor.serverReachable ? .green : .orange)
+                    Image(systemName: effectivelyReachable ? "wifi" : "wifi.slash")
+                        .foregroundStyle(effectivelyReachable ? .green : .orange)
                 }
                 Spacer()
             }
@@ -251,6 +258,8 @@ struct ClearMediaCard: View {
 
     @State private var showConfirmation = false
     @State private var isDeleting = false
+    @State private var deleteError: String?
+    @State private var deleteSuccessMessage: String?
 
     var effectiveBacked: Int {
         min(mediaLibrary.totalCount,
@@ -283,6 +292,22 @@ struct ClearMediaCard: View {
                             .background(isDeleting ? Color.gray : Color.red, in: RoundedRectangle(cornerRadius: 10))
                     }
                     .disabled(isDeleting)
+                    .alert("Deletion Failed", isPresented: Binding(
+                        get: { deleteError != nil },
+                        set: { if !$0 { deleteError = nil } }
+                    )) {
+                        Button("OK", role: .cancel) {}
+                    } message: {
+                        Text(deleteError ?? "")
+                    }
+                    .alert("Media Cleared", isPresented: Binding(
+                        get: { deleteSuccessMessage != nil },
+                        set: { if !$0 { deleteSuccessMessage = nil } }
+                    )) {
+                        Button("OK", role: .cancel) {}
+                    } message: {
+                        Text(deleteSuccessMessage ?? "")
+                    }
                     .confirmationDialog(
                         "Remove all media from this device?",
                         isPresented: $showConfirmation,
@@ -291,8 +316,13 @@ struct ClearMediaCard: View {
                         Button("Yes, Delete Everything", role: .destructive) {
                             Task {
                                 isDeleting = true
-                                await mediaLibrary.deleteAllAssets()
+                                let error = await mediaLibrary.deleteAllAssets()
                                 isDeleting = false
+                                if let error {
+                                    deleteError = error
+                                } else {
+                                    deleteSuccessMessage = "All media has been moved to Recently Deleted. It will be permanently removed after 30 days, or you can empty it now in the Photos app."
+                                }
                             }
                         }
                         Button("No", role: .cancel) {}

@@ -112,8 +112,7 @@ actor SyncAPIClient {
 
     func fetchManifest(since: Date? = nil) async throws -> ManifestResponse {
         guard let serverURL = await settings.serverURL else { throw APIError.noServerConfigured }
-        let folder = await settings.deviceFolder
-        var items = [URLQueryItem(name: "device_folder", value: folder)]
+        var items = [URLQueryItem(name: "device_folder", value: "")]
         if let since {
             items.append(URLQueryItem(name: "since", value: ISO8601DateFormatter().string(from: since)))
         }
@@ -157,7 +156,7 @@ actor SyncAPIClient {
         appendField("creation_date", isoDate)
         appendField("sha256", sha256)
         appendField("size_bytes", String(sizeBytes))
-        appendField("device_folder", await settings.deviceFolder)
+        appendField("device_folder", "")
         preamble += Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8)
         let epilogue = Data("\r\n--\(boundary)--\r\n".utf8)
 
@@ -181,8 +180,7 @@ actor SyncAPIClient {
     /// Asks the server to scan its storage folder and index any untracked files.
     /// Returns (indexed, alreadyKnown) counts.
     func indexServerFiles() async throws -> (indexed: Int, alreadyKnown: Int) {
-        let folder = await settings.deviceFolder
-        let data = try await post("manifest/index", json: ["device_folder": folder])
+        let data = try await post("manifest/index", json: ["device_folder": ""])
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return (0, 0)
         }
@@ -208,7 +206,7 @@ actor SyncAPIClient {
             "media_type": mediaType.rawValue,
             "creation_date": isoDate,
             "size_bytes": sizeBytes,
-            "device_folder": await settings.deviceFolder
+            "device_folder": ""
         ]
         guard let data = try? await post("manifest/register", json: body),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -219,19 +217,16 @@ actor SyncAPIClient {
     /// Tells the server to prune manifest entries whose files no longer exist on disk.
     /// Call at the start of sync so deleted-on-server assets are re-uploaded.
     func reconcileServerManifest() async throws -> Int {
-        let folder = await settings.deviceFolder
-        let data = try await post("manifest/reconcile", json: ["device_folder": folder])
+        let data = try await post("manifest/reconcile", json: ["device_folder": ""])
         if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let pruned = json["pruned"] as? Int { return pruned }
         return 0
     }
 
     func resetServerManifest() async throws {
-        let folder = await settings.deviceFolder.addingPercentEncoding(
-            withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let serverURL = await settings.serverURL else { throw APIError.noServerConfigured }
         var req = URLRequest(url: serverURL.appendingPathComponent("manifest")
-            .appending(queryItems: [URLQueryItem(name: "device_folder", value: folder)]))
+            .appending(queryItems: [URLQueryItem(name: "device_folder", value: "")]))
         req.httpMethod = "DELETE"
         req.setValue(await settings.apiKey, forHTTPHeaderField: "X-API-Key")
         let (data, response) = try await lightSession().data(for: req)

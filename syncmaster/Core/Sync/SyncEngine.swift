@@ -247,9 +247,18 @@ final class SyncEngine: ObservableObject {
 
             var uploaded = 0, skipped = 0, failed = 0
             var bytesTotal: Int64 = 0
+            var consecutiveNetworkFailures = 0
 
             for (idx, asset) in toUpload.enumerated() {
                 if Task.isCancelled { break }
+
+                // Abort if the server has been consistently unreachable — avoids
+                // burning through hundreds of assets with timeout failures.
+                if consecutiveNetworkFailures >= 3 {
+                    log.warning("■ Aborting sync — server unreachable after \(consecutiveNetworkFailures) consecutive network failures")
+                    status = .failed(error: "Server unreachable — sync will resume when server is back online")
+                    return
+                }
 
                 let (mediaType, name) = await Task.detached(priority: .userInitiated) {
                     let type = MediaLibraryService.detectMediaType(for: asset)
@@ -355,6 +364,12 @@ final class SyncEngine: ObservableObject {
                     failed += 1
                     failedIdentifiers.insert(asset.localIdentifier)
                     log.error("  ✗ Failed \(name, privacy: .public) (type: \(mediaType.rawValue, privacy: .public)) after \(attempts) attempt(s): \(String(describing: error), privacy: .public)")
+                    let isNetworkError = (error as? URLError).map {
+                        [.timedOut, .cannotConnectToHost, .networkConnectionLost, .notConnectedToInternet].contains($0.code)
+                    } ?? false
+                    if isNetworkError { consecutiveNetworkFailures += 1 } else { consecutiveNetworkFailures = 0 }
+                } else {
+                    consecutiveNetworkFailures = 0
                 }
 
                 session.uploadedCount = uploaded

@@ -92,19 +92,26 @@ final class MediaLibraryService: ObservableObject {
         allAssets[i].uploadState = .uploaded
     }
 
-    func deleteAllAssets() async {
-        let ids = allAssets.map(\.id)
-        guard !ids.isEmpty else { return }
-        let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
-        guard result.count > 0 else { return }
+    /// Deletes all user-owned assets from the device photo library.
+    /// Shared Photo Library, shared album, and iTunes-synced assets are excluded —
+    /// PhotoKit does not allow third-party apps to delete those.
+    /// Returns nil on success, or an error message string on failure.
+    func deleteAllAssets() async -> String? {
+        // Only typeUserLibrary assets can be deleted by third-party apps.
+        // Including typeCloudShared or typeiTunesSynced causes error 3300 for the entire batch.
+        let opts = PHFetchOptions()
+        opts.includeAssetSourceTypes = [.typeUserLibrary]
+        let result = PHAsset.fetchAssets(with: opts)
+        guard result.count > 0 else { return nil }
         do {
             try await PHPhotoLibrary.shared().performChanges {
                 PHAssetChangeRequest.deleteAssets(result)
             }
+            await loadAssets()
+            return nil
         } catch {
-            // User denied or system error — nothing to do
+            return error.localizedDescription
         }
-        await loadAssets()
     }
 
     var totalCount: Int { allAssets.count }
