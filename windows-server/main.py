@@ -2,12 +2,21 @@
 SyncMaster Server — entry point.
 Runs FastAPI (uvicorn) in a daemon thread; PyQt6 GUI on the main thread.
 """
+import asyncio
+import multiprocessing
 import queue
 import sys
 import threading
 import uvicorn
 import ctypes
 from PyQt6.QtWidgets import QApplication, QMessageBox
+
+# PyInstaller + Windows: must call freeze_support() before anything else.
+# Also force SelectorEventLoop — ProactorEventLoop (Windows default in 3.8+)
+# causes uvicorn to fail silently in a frozen exe.
+if sys.platform == "win32":
+    multiprocessing.freeze_support()
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from server.config import get_config
 from server.ssl_utils import generate_self_signed_cert, cert_covers_current_ip, get_local_ip

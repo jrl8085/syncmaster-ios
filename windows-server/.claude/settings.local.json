@@ -2,7 +2,24 @@
   "permissions": {
     "allow": [
       "Bash(venv/Scripts/python.exe main.py)",
-      "Bash(echo \"EXIT: $?\")"
+      "Bash(echo \"EXIT: $?\")",
+      "Bash(pyinstaller syncmaster.spec --noconfirm)",
+      "Bash(python -m PyInstaller syncmaster.spec --noconfirm)",
+      "Bash(python:*)",
+      "Bash(C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe -c \"import qt_material; import os; print\\(os.path.dirname\\(qt_material.__file__\\)\\)\" 2>&1)",
+      "Bash(cmd.exe /c \"C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe -c \\\\\"import qt_material; import os; print\\(os.path.dirname\\(qt_material.__file__\\)\\)\\\\\"\" 2>&1)",
+      "Bash(cmd.exe /c \"C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe -c \\\\\"import qt_material; import os; print\\(os.path.dirname\\(qt_material.__file__\\)\\)\\\\\" 2>&1\")",
+      "Bash(cmd.exe /c \"C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe -m pip show qt-material 2>&1 && C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe -m pip show uvicorn 2>&1\")",
+      "Bash(cmd.exe /c \"C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe -m pip show qt-material > C:\\\\Users\\\\jaylo\\\\tmp_out.txt 2>&1\")",
+      "Read(//c/Users/jaylo/**)",
+      "Bash(powershell -Command \"& 'C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe' -m pip show qt-material; & 'C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe' -m pip show uvicorn\" 2>&1)",
+      "Bash(powershell -Command \"Get-Command python* | Select-Object -ExpandProperty Source\" 2>&1)",
+      "Bash(powershell -Command \"& 'C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe' -m pip show qt-material uvicorn fastapi 2>&1\")",
+      "Bash(powershell -Command \"& 'C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\bin\\\\python.exe' -m pip list 2>&1 | Select-String -Pattern 'uvicorn|fastapi|qt|PyQt|PyInstaller'\" 2>&1)",
+      "Bash(powershell -Command \"& 'C:\\\\Users\\\\jaylo\\\\AppData\\\\Local\\\\Python\\\\pythoncore-3.14-64\\\\python.exe' -m pip list 2>&1 | Select-String -Pattern 'uvicorn|fastapi|qt|PyQt|aiosqlite|cryptography|starlette'\" 2>&1)",
+      "Bash(powershell -Command \"Get-ChildItem -Path 'C:\\\\Users\\\\jaylo' -Name 'python.exe' -Recurse -ErrorAction SilentlyContinue 2>&1 | Select-Object -First 20\" 2>&1)",
+      "Bash(powershell -Command \"& 'C:\\\\Users\\\\jaylo\\\\OneDrive\\\\Desktop\\\\syncmaster-ios\\\\windows-server\\\\venv\\\\Scripts\\\\python.exe' -m pip list 2>&1 | Select-String -Pattern 'uvicorn|fastapi|qt|PyQt|aiosqlite|cryptography|starlette|pyinstaller'\" 2>&1)",
+      "Bash(powershell -Command \"& ''venv\\\\Scripts\\\\python.exe'' -m PyInstaller syncmaster.spec --noconfirm 2>&1\")"
     ]
   }
 }
