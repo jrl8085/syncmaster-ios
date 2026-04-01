@@ -47,6 +47,11 @@ a = Analysis(
         "aiosqlite",
         "aiofiles",
         "multipart",
+        "multipart.multipart",
+        "sniffio",
+        "uvicorn.main",
+        "email.mime.text",
+        "email.mime.multipart",
     ],
     hookspath=[],
     hooksconfig={},
@@ -74,7 +79,7 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,          # no console window — GUI only
+    console=True,           # temporarily enabled for debugging
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
