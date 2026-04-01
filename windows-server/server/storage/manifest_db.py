@@ -67,6 +67,9 @@ async def init_db():
     # OR REPLACE handles the rare case where both ("id","") and ("id","iPhone") exist.
     await db.execute("UPDATE OR REPLACE files SET device_folder='' WHERE device_folder != ''")
     await db.commit()
+    # Migration: normalize stored_path to forward slashes so index scans match on Windows.
+    await db.execute("UPDATE files SET stored_path = REPLACE(stored_path, '\\', '/') WHERE stored_path LIKE '%\\%'")
+    await db.commit()
 
 async def find_by_identifier(identifier: str, device_folder: str = "") -> Optional[dict]:
     db = await get_db()
@@ -109,12 +112,13 @@ async def get_manifest(since: Optional[str] = None, device_folder: str = "") -> 
         return [dict(r) for r in await c.fetchall()]
 
 async def get_stored_paths(device_folder: str = "") -> set[str]:
-    """Return the set of stored_path values already in the manifest for a device folder."""
+    """Return the set of stored_path values already in the manifest for a device folder.
+    Always returns forward-slash paths for consistent comparison with as_posix() scans."""
     db = await get_db()
     async with db.execute(
         "SELECT stored_path FROM files WHERE device_folder=?", (device_folder,)
     ) as c:
-        return {r[0] for r in await c.fetchall()}
+        return {r[0].replace("\\", "/") for r in await c.fetchall()}
 
 async def get_all_device_folders() -> list[str]:
     """Return distinct device_folder values currently in the manifest."""

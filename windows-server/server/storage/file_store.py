@@ -43,7 +43,7 @@ async def store_file(file_data: bytes, identifier: str, filename: str, media_typ
     dest_dir = _make_dest_dir(creation_date, device_folder)
     dest = _unique_path(dest_dir, filename)
     dest.write_bytes(file_data)
-    stored_path = str(dest.relative_to(root))
+    stored_path = dest.relative_to(root).as_posix()  # always forward slashes
     record = await manifest_db.insert_file(
         identifier, filename, sha256, size_bytes, media_type,
         stored_path, creation_date, device_folder)
