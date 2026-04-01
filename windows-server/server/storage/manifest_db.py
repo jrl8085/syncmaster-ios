@@ -49,6 +49,10 @@ async def init_db():
             pass  # column already exists
         await db.executescript(SCHEMA)
         await db.commit()
+        # Migration: flatten device subfolders — all records now use device_folder=''.
+        # OR REPLACE handles the rare case where both ("id","") and ("id","iPhone") exist.
+        await db.execute("UPDATE OR REPLACE files SET device_folder='' WHERE device_folder != ''")
+        await db.commit()
 
 async def find_by_identifier(identifier: str, device_folder: str = "") -> Optional[dict]:
     async with aiosqlite.connect(_DB) as db:

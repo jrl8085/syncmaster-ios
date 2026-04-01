@@ -133,6 +133,7 @@ struct ServerSetupView: View {
             if (response as? HTTPURLResponse)?.statusCode == 200,
                let h = try? JSONDecoder().decode(HealthResponse.self, from: data) {
                 status = .connected(version: h.version)
+                if isOnboarding { save() }
             } else {
                 status = .failed(error: "Server returned an error")
             }
