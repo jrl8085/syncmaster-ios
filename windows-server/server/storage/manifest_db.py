@@ -70,6 +70,11 @@ async def init_db():
     # Migration: normalize stored_path to forward slashes so index scans match on Windows.
     await db.execute("UPDATE files SET stored_path = REPLACE(stored_path, '\\', '/') WHERE stored_path LIKE '%\\%'")
     await db.commit()
+    # Migration: purge __indexed__ placeholder entries — they accumulated due to a path
+    # separator bug that caused every index scan to re-insert all files. Real uploaded
+    # files have proper identifiers; manifest/index will recreate placeholders correctly.
+    await db.execute("DELETE FROM files WHERE identifier LIKE '__indexed__%'")
+    await db.commit()
 
 async def find_by_identifier(identifier: str, device_folder: str = "") -> Optional[dict]:
     db = await get_db()
