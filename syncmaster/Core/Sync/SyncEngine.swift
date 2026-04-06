@@ -2,6 +2,7 @@ import Foundation
 import Photos
 import Combine
 import OSLog
+import UIKit
 
 private let log = Logger(subsystem: "com.syncmaster", category: "SyncEngine")
 
@@ -33,7 +34,9 @@ enum SyncStatus: Equatable {
 
 @MainActor
 final class SyncEngine: ObservableObject {
-    @Published private(set) var status: SyncStatus = .idle
+    @Published private(set) var status: SyncStatus = .idle {
+        didSet { UIApplication.shared.isIdleTimerDisabled = status.isActive }
+    }
     @Published private(set) var currentSession: SyncSession?
     @Published private(set) var overallProgress: Double = 0
     @Published private(set) var syncedCount: Int = UserDefaults.standard.integer(forKey: "sm_syncedCount") {
